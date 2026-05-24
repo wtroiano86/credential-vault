@@ -1,0 +1,80 @@
+{
+    "name": "skillcraft/credential-vault",
+    "description": "Secure per-tenant encrypted credential storage for Laravel applications.",
+    "type": "library",
+    "license": "MIT",
+    "version": "1.0.0",
+    "autoload": {
+        "psr-4": {
+            "Skillcraft\\CredentialVault\\": "src/"
+        }
+    },
+    "require": {
+        "php": "^8.4|^8.5",
+        "illuminate/contracts": "^13",
+        "illuminate/database": "^13",
+        "illuminate/encryption": "^13",
+        "illuminate/log": "^13",
+        "illuminate/support": "^13",
+        "skillcraft/support": "*@dev"
+    },
+    "require-dev": {
+        "larastan/larastan": "^3.0",
+        "laravel/pint": "^1.27",
+        "rector/rector": "^2.3",
+        "mockery/mockery": "^1.6",
+        "orchestra/testbench": "^11.0",
+        "pestphp/pest": "^4.0",
+        "pestphp/pest-plugin-drift": "^4.1"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Skillcraft\\CredentialVault\\Providers\\CredentialVaultServiceProvider"
+            ],
+            "aliases": {
+                "Vault": "Skillcraft\\CredentialVault\\Facades\\Vault"
+            }
+        }
+    },
+    "scripts": {
+        "lint": "pint",
+        "lint:check": "pint --test",
+        "analyse": "phpstan analyse -c phpstan.neon --memory-limit=512M",
+        "analyse:baseline": "phpstan analyse -c phpstan.neon --generate-baseline --memory-limit=512M",
+        "refactor": "rector process",
+        "refactor:check": "rector process --dry-run",
+        "check": [
+            "@lint:check",
+            "@analyse",
+            "@test:coverage"
+        ],
+        "test": "vendor/bin/pest --no-coverage",
+        "test:compact": "../../../vendor/bin/phpunit --configuration phpunit.xml --no-output",
+        "test:unit": "vendor/bin/pest --no-coverage tests/Unit",
+        "test:integration": "vendor/bin/pest --no-coverage tests/Feature",
+        "test:coverage": "vendor/bin/pest --coverage --stop-on-failure"
+    },
+    "config": {
+        "sort-packages": true,
+        "preferred-install": "dist",
+        "optimize-autoloader": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/skillcraft-io/skillcraft-support.git"
+        }
+    ],
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\Unit\\Packages\\SkillcraftCredentialVault\\": "tests/Unit/",
+            "Tests\\Feature\\Packages\\SkillcraftCredentialVault\\": "tests/Feature/"
+        }
+    }
+}

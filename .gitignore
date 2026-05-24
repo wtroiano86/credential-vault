@@ -1,0 +1,11 @@
+vendor
+.agentdock
+.automaker
+auth.json
+build
+html-coverage
+composer.lock
+build
+html-coverage
+.phpunit.cache
+.idea

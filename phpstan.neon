@@ -1,0 +1,10 @@
+includes:
+    - ../../../vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 8
+    paths:
+        - src
+    ignoreErrors:
+        # HasVault is a consumer-facing trait; it will be used in host applications.
+        - identifier: trait.unused
