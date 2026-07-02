@@ -38,7 +38,9 @@ class VaultEntry extends Model implements VaultEntryInterface
     #[Override]
     public function getTable(): string
     {
-        return 'vault_entries';
+        $table = config('packages.credential-vault.general.table', 'scp_vault_entries');
+
+        return is_string($table) ? $table : 'scp_vault_entries';
     }
 
     /**

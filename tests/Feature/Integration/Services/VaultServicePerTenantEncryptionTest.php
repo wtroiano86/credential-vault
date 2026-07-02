@@ -18,7 +18,7 @@ final class VaultServicePerTenantEncryptionTest extends CredentialVaultIntegrati
         config([
             'app.key' => $appKey,
             'app.cipher' => 'AES-256-CBC',
-            'packages.skillcraft-credential-vault.general.encryption.per_tenant_key' => true,
+            'packages.credential-vault.general.encryption.per_tenant_key' => true,
         ]);
     }
 

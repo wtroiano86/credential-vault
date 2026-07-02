@@ -13,7 +13,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('vault_entries', function (Blueprint $table): void {
+        Schema::create(config('packages.credential-vault.general.table', 'scp_vault_entries'), function (Blueprint $table): void {
             $table->ulid('id')->primary();
             $table->string('owner_type');
             $table->string('owner_id');
@@ -34,6 +34,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('vault_entries');
+        Schema::dropIfExists(config('packages.credential-vault.general.table', 'scp_vault_entries'));
     }
 };

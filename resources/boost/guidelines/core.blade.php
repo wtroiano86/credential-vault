@@ -24,7 +24,7 @@ php artisan migrate
 
 ### Configuration
 
-Config is accessed via `config('packages.skillcraft-credential-vault.general.{key}')`.
+Config is accessed via `config('packages.credential-vault.general.{key}')`.
 
 @verbatim
 <code-snippet name="Key configuration options" lang="php">

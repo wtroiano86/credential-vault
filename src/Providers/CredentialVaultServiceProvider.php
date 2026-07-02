@@ -21,7 +21,7 @@ use Skillcraft\Support\Traits\LoadAndPublishDataTrait;
  * bindings so the package works out of the box via Laravel auto-discovery.
  *
  * Configuration is published under:
- *   `packages.skillcraft-credential-vault.general.*`
+ *   `packages.credential-vault.general.*`
  */
 final class CredentialVaultServiceProvider extends ServiceProvider
 {
@@ -39,7 +39,7 @@ final class CredentialVaultServiceProvider extends ServiceProvider
         // The provider lives at src/Providers; go up two levels to reach the
         // package root where config/ and database/ directories live.
         $this->setBasePath(dirname(__DIR__, 2))
-            ->setNamespace('packages/skillcraft-credential-vault')
+            ->setNamespace('packages/credential-vault')
             ->loadAndPublishConfigurations(['general']);
 
         $this->app->singleton(
@@ -47,7 +47,7 @@ final class CredentialVaultServiceProvider extends ServiceProvider
             static function (Application $app): VaultEncryptionInterface {
                 /** @var class-string<VaultEncryptionInterface> $class */
                 $class = config(
-                    'packages.skillcraft-credential-vault.general.services.encryption',
+                    'packages.credential-vault.general.services.encryption',
                     LaravelVaultEncryption::class,
                 );
 
@@ -68,7 +68,7 @@ final class CredentialVaultServiceProvider extends ServiceProvider
             static function (Application $app): VaultServiceInterface {
                 /** @var class-string<VaultServiceInterface> $class */
                 $class = config(
-                    'packages.skillcraft-credential-vault.general.services.vault',
+                    'packages.credential-vault.general.services.vault',
                     VaultService::class,
                 );
 

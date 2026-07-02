@@ -11,7 +11,7 @@ return [
         'encryption' => LaravelVaultEncryption::class,
     ],
 
-    'table' => 'vault_entries',
+    'table' => 'scp_vault_entries',
     'model' => VaultEntry::class,
 
     'encryption' => [

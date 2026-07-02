@@ -48,7 +48,7 @@ final class CredentialVaultServiceProviderTest extends CredentialVaultTestCase
 
         app()->bind($customClassName, fn () => $customClass);
 
-        config(['packages.skillcraft-credential-vault.general.services.encryption' => $customClassName]);
+        config(['packages.credential-vault.general.services.encryption' => $customClassName]);
 
         app()->forgetInstance(VaultEncryptionInterface::class);
 
@@ -111,7 +111,7 @@ final class CredentialVaultServiceProviderTest extends CredentialVaultTestCase
 
         app()->bind($customClassName, fn () => $customClass);
 
-        config(['packages.skillcraft-credential-vault.general.services.vault' => $customClassName]);
+        config(['packages.credential-vault.general.services.vault' => $customClassName]);
 
         app()->forgetInstance(VaultServiceInterface::class);
 
