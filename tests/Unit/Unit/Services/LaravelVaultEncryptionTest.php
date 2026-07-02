@@ -226,4 +226,17 @@ final class LaravelVaultEncryptionTest extends CredentialVaultTestCase
 
         $this->assertSame('raw-key-value', $decrypted);
     }
+
+    public function test_decrypt_throws_when_encrypter_returns_non_string_value(): void
+    {
+        $broken = Mockery::mock(EncrypterContract::class);
+        $broken->shouldReceive('decrypt')->andReturn(123);
+
+        $service = new LaravelVaultEncryption($broken);
+
+        $this->expectException(CryptoOperationException::class);
+        $this->expectExceptionMessage('Decryption did not return a string value.');
+
+        $service->decrypt('payload');
+    }
 }

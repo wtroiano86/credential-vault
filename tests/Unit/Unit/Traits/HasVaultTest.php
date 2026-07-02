@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Packages\SkillcraftCredentialVault\Unit\Traits;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Mockery;
 use Skillcraft\CredentialVault\Contracts\VaultEntryInterface;
@@ -16,7 +17,7 @@ final class HasVaultTest extends CredentialVaultTestCase
 {
     private VaultServiceInterface $mockService;
 
-    private \Illuminate\Database\Eloquent\Model $model;
+    private Model $model;
 
     protected function setUp(): void
     {

@@ -32,7 +32,7 @@ trait HasVault
     /**
      * All vault entries owned by this model.
      *
-     * @return MorphMany<VaultEntry>
+     * @return MorphMany<VaultEntry, $this>
      */
     public function vaultEntries(): MorphMany
     {
