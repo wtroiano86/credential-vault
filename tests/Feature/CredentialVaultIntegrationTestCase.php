@@ -29,10 +29,10 @@ abstract class CredentialVaultIntegrationTestCase extends CredentialVaultTestCas
         $this->dispatcher = app(Dispatcher::class);
 
         config([
-            'packages.skillcraft-credential-vault.general.audit.enabled' => false,
-            'packages.skillcraft-credential-vault.general.encryption.per_tenant_key' => false,
-            'packages.skillcraft-credential-vault.general.expired.return_null' => true,
-            'packages.skillcraft-credential-vault.general.allowed_key_patterns' => ['/^[a-z][a-z0-9_]{1,98}[a-z0-9]$/'],
+            'packages.credential-vault.general.audit.enabled' => false,
+            'packages.credential-vault.general.encryption.per_tenant_key' => false,
+            'packages.credential-vault.general.expired.return_null' => true,
+            'packages.credential-vault.general.allowed_key_patterns' => ['/^[a-z][a-z0-9_]{1,98}[a-z0-9]$/'],
         ]);
 
         $this->service = new VaultService($this->encryption, $this->dispatcher);

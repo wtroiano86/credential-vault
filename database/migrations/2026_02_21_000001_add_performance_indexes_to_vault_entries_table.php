@@ -18,7 +18,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('vault_entries', function (Blueprint $table): void {
+        Schema::table(config('packages.credential-vault.general.table', 'scp_vault_entries'), function (Blueprint $table): void {
             // Composite index for polymorphic owner queries (WHERE owner_type = X AND owner_id = Y)
             $table->index(['owner_type', 'owner_id'], 'vault_entries_owner_index');
 
@@ -32,7 +32,7 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::table('vault_entries', function (Blueprint $table): void {
+        Schema::table(config('packages.credential-vault.general.table', 'scp_vault_entries'), function (Blueprint $table): void {
             $table->dropIndex('vault_entries_owner_index');
             $table->dropIndex('vault_entries_deleted_at_index');
             $table->dropIndex('vault_entries_expires_at_index');

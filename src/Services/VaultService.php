@@ -24,16 +24,18 @@ use Skillcraft\CredentialVault\Models\VaultEntry;
  * All credential values are encrypted via {@see VaultEncryptionInterface} before
  * persistence and are never exposed in events, logs, or metadata payloads.
  */
-final class VaultService implements VaultServiceInterface
+final readonly class VaultService implements VaultServiceInterface
 {
     /**
      * Config key prefix for this package.
      */
-    private const CONFIG_PREFIX = 'packages.skillcraft-credential-vault.general';
+    private const CONFIG_PREFIX = 'packages.credential-vault.general';
+
+    private const LEGACY_CONFIG_PREFIX = 'packages.skillcraft-credential-vault.general';
 
     public function __construct(
-        private readonly VaultEncryptionInterface $encryption,
-        private readonly Dispatcher $events,
+        private VaultEncryptionInterface $encryption,
+        private Dispatcher $events,
     ) {}
 
     /**
@@ -57,7 +59,7 @@ final class VaultService implements VaultServiceInterface
         $encrypted = $this->encryption->encrypt($value, $this->getTenantKey($owner));
 
         /** @var VaultEntry $entry */
-        $entry = VaultEntry::updateOrCreate(
+        $entry = $this->vaultEntryClass()::updateOrCreate(
             ['owner_type' => $ownerType, 'owner_id' => $ownerId, 'key_name' => $key],
             ['encrypted_value' => $encrypted, 'metadata' => $metadata],
         );
@@ -83,7 +85,7 @@ final class VaultService implements VaultServiceInterface
         [$ownerType, $ownerId] = $this->ownerPair($owner);
 
         /** @var VaultEntry|null $entry */
-        $entry = VaultEntry::where('owner_type', $ownerType)
+        $entry = $this->vaultEntryClass()::where('owner_type', $ownerType)
             ->where('owner_id', $ownerId)
             ->where('key_name', $key)
             ->first();
@@ -96,7 +98,12 @@ final class VaultService implements VaultServiceInterface
             return null;
         }
 
-        $encryptedValue = (string) $entry->getAttribute('encrypted_value');
+        $encryptedValue = $entry->getAttribute('encrypted_value');
+
+        if (! is_string($encryptedValue)) {
+            return null;
+        }
+
         $value = $this->encryption->decrypt($encryptedValue, $this->getTenantKey($owner));
 
         if ($this->auditEnabled()) {
@@ -118,7 +125,7 @@ final class VaultService implements VaultServiceInterface
     {
         [$ownerType, $ownerId] = $this->ownerPair($owner);
 
-        VaultEntry::where('owner_type', $ownerType)
+        $this->vaultEntryClass()::where('owner_type', $ownerType)
             ->where('owner_id', $ownerId)
             ->where('key_name', $key)
             ->delete();
@@ -145,7 +152,7 @@ final class VaultService implements VaultServiceInterface
         [$ownerType, $ownerId] = $this->ownerPair($owner);
 
         /** @var VaultEntry|null $entry */
-        $entry = VaultEntry::where('owner_type', $ownerType)
+        $entry = $this->vaultEntryClass()::where('owner_type', $ownerType)
             ->where('owner_id', $ownerId)
             ->where('key_name', $key)
             ->first();
@@ -175,7 +182,7 @@ final class VaultService implements VaultServiceInterface
     {
         [$ownerType, $ownerId] = $this->ownerPair($owner);
 
-        return VaultEntry::where('owner_type', $ownerType)
+        return $this->vaultEntryClass()::where('owner_type', $ownerType)
             ->where('owner_id', $ownerId)
             ->where('key_name', $key)
             ->exists();
@@ -194,17 +201,15 @@ final class VaultService implements VaultServiceInterface
     {
         [$ownerType, $ownerId] = $this->ownerPair($owner);
 
-        return VaultEntry::where('owner_type', $ownerType)
+        return $this->vaultEntryClass()::where('owner_type', $ownerType)
             ->where('owner_id', $ownerId)
             ->get()
-            ->map(static function (VaultEntry $entry): array {
-                return [
-                    'key' => $entry->getCredentialKey(),
-                    'metadata' => $entry->getMetadata(),
-                    'created_at' => $entry->created_at?->toIso8601String() ?? '',
-                    'rotated_at' => $entry->getRotatedAt()?->format(DATE_ATOM),
-                ];
-            })
+            ->map(static fn (VaultEntry $entry): array => [
+                'key' => $entry->getCredentialKey(),
+                'metadata' => $entry->getMetadata(),
+                'created_at' => $entry->created_at?->toIso8601String() ?? '',
+                'rotated_at' => $entry->getRotatedAt()?->format(DATE_ATOM),
+            ])
             ->values()
             ->all();
     }
@@ -246,7 +251,17 @@ final class VaultService implements VaultServiceInterface
             return null;
         }
 
-        return (string) $owner->getKey();
+        $ownerKey = $owner->getKey();
+
+        if ($ownerKey === null) {
+            return null;
+        }
+
+        if (! is_scalar($ownerKey)) {
+            return null;
+        }
+
+        return (string) $ownerKey;
     }
 
     /**
@@ -258,10 +273,36 @@ final class VaultService implements VaultServiceInterface
     }
 
     /**
+     * Resolve the configured vault entry model class.
+     *
+     * @return class-string<VaultEntry>
+     */
+    private function vaultEntryClass(): string
+    {
+        $class = $this->config('model', VaultEntry::class);
+
+        if (! is_string($class)) {
+            return VaultEntry::class;
+        }
+
+        if ($class !== VaultEntry::class && ! is_subclass_of($class, VaultEntry::class)) {
+            return VaultEntry::class;
+        }
+
+        return $class;
+    }
+
+    /**
      * Read a value from the package config.
      */
     private function config(string $key, mixed $default = null): mixed
     {
+        $legacyKey = self::LEGACY_CONFIG_PREFIX.'.'.$key;
+
+        if (config()->has($legacyKey)) {
+            return config($legacyKey);
+        }
+
         return config(self::CONFIG_PREFIX.'.'.$key, $default);
     }
 
@@ -272,6 +313,11 @@ final class VaultService implements VaultServiceInterface
      */
     private function ownerPair(Model $owner): array
     {
-        return [$owner->getMorphClass(), (string) $owner->getKey()];
+        $ownerKey = $owner->getKey();
+
+        return [
+            $owner->getMorphClass(),
+            is_scalar($ownerKey) ? (string) $ownerKey : '',
+        ];
     }
 }

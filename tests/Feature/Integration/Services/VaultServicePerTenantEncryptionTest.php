@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Packages\SkillcraftCredentialVault\Integration\Services;
 
+use Illuminate\Database\Eloquent\Model;
 use Tests\Feature\Packages\SkillcraftCredentialVault\CredentialVaultIntegrationTestCase;
 use Tests\Feature\Packages\SkillcraftCredentialVault\Support\VaultTestModels;
 
@@ -17,7 +18,7 @@ final class VaultServicePerTenantEncryptionTest extends CredentialVaultIntegrati
         config([
             'app.key' => $appKey,
             'app.cipher' => 'AES-256-CBC',
-            'packages.skillcraft-credential-vault.general.encryption.per_tenant_key' => true,
+            'packages.credential-vault.general.encryption.per_tenant_key' => true,
         ]);
     }
 
@@ -37,5 +38,49 @@ final class VaultServicePerTenantEncryptionTest extends CredentialVaultIntegrati
         $this->service->store($ownerA, 'api_key', 'secret-A');
 
         $this->assertNull($this->service->retrieve($ownerB, 'api_key'));
+    }
+
+    public function test_per_tenant_key_returns_null_when_owner_primary_key_is_null(): void
+    {
+        $owner = new class extends Model
+        {
+            protected $table = 'users';
+
+            public function getMorphClass(): string
+            {
+                return 'App\\Models\\User';
+            }
+
+            public function getKey(): mixed
+            {
+                return null;
+            }
+        };
+
+        $this->service->store($owner, 'api_key', 'tenant-secret');
+
+        $this->assertSame('tenant-secret', $this->service->retrieve($owner, 'api_key'));
+    }
+
+    public function test_per_tenant_key_returns_null_when_owner_primary_key_is_non_scalar(): void
+    {
+        $owner = new class extends Model
+        {
+            protected $table = 'users';
+
+            public function getMorphClass(): string
+            {
+                return 'App\\Models\\User';
+            }
+
+            public function getKey(): mixed
+            {
+                return ['unsupported'];
+            }
+        };
+
+        $this->service->store($owner, 'api_key', 'tenant-secret');
+
+        $this->assertSame('tenant-secret', $this->service->retrieve($owner, 'api_key'));
     }
 }

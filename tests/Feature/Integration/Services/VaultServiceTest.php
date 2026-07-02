@@ -123,7 +123,7 @@ final class VaultServiceTest extends CredentialVaultIntegrationTestCase
 
     public function test_retrieve_returns_value_for_expired_entry_when_expired_return_null_false(): void
     {
-        config(['packages.skillcraft-credential-vault.general.expired.return_null' => false]);
+        config(['packages.credential-vault.general.expired.return_null' => false]);
 
         $owner = VaultTestModels::owner();
         $this->service->store($owner, 'temp_token', 'tok');
@@ -148,7 +148,7 @@ final class VaultServiceTest extends CredentialVaultIntegrationTestCase
 
     public function test_retrieve_dispatches_credential_accessed_when_audit_enabled(): void
     {
-        config(['packages.skillcraft-credential-vault.general.audit.enabled' => true]);
+        config(['packages.credential-vault.general.audit.enabled' => true]);
         Event::fake([CredentialAccessed::class]);
 
         $owner = VaultTestModels::owner('App\\Models\\User', 'user-77');
@@ -401,12 +401,54 @@ final class VaultServiceTest extends CredentialVaultIntegrationTestCase
 
     public function test_validate_key_via_store_when_allowed_key_patterns_empty_throws(): void
     {
-        config(['packages.skillcraft-credential-vault.general.allowed_key_patterns' => []]);
+        config(['packages.credential-vault.general.allowed_key_patterns' => []]);
 
         $owner = VaultTestModels::owner();
 
         $this->expectException(InvalidCredentialKeyException::class);
 
         $this->service->store($owner, 'ANY-KEY', 'v');
+    }
+
+    public function test_retrieve_returns_null_when_encrypted_value_is_not_a_string(): void
+    {
+        config(['packages.skillcraft-credential-vault.general.model' => CorruptEncryptedValueVaultEntry::class]);
+
+        $owner = VaultTestModels::owner();
+        $this->service->store($owner, 'api_key', 'secret');
+
+        $this->assertNull($this->service->retrieve($owner, 'api_key'));
+    }
+
+    public function test_vault_entry_class_falls_back_to_default_when_model_config_is_invalid(): void
+    {
+        config(['packages.skillcraft-credential-vault.general.model' => 123]);
+
+        $owner = VaultTestModels::owner();
+        $this->service->store($owner, 'api_key', 'secret');
+
+        $this->assertSame('secret', $this->service->retrieve($owner, 'api_key'));
+    }
+
+    public function test_vault_entry_class_falls_back_to_default_when_model_config_is_not_a_vault_entry(): void
+    {
+        config(['packages.skillcraft-credential-vault.general.model' => \stdClass::class]);
+
+        $owner = VaultTestModels::owner();
+        $this->service->store($owner, 'api_key', 'secret');
+
+        $this->assertSame('secret', $this->service->retrieve($owner, 'api_key'));
+    }
+}
+
+final class CorruptEncryptedValueVaultEntry extends VaultEntry
+{
+    public function getAttribute($key): mixed
+    {
+        if ($key === 'encrypted_value') {
+            return 123;
+        }
+
+        return parent::getAttribute($key);
     }
 }

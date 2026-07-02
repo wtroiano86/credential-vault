@@ -18,10 +18,10 @@ use Throwable;
  * tenant key is the owner's primary key value; the actual cryptographic key is
  * derived internally — it is never stored or returned.
  */
-final class LaravelVaultEncryption implements VaultEncryptionInterface
+final readonly class LaravelVaultEncryption implements VaultEncryptionInterface
 {
     public function __construct(
-        private readonly EncrypterContract $encrypter,
+        private EncrypterContract $encrypter,
     ) {}
 
     /**
@@ -42,10 +42,7 @@ final class LaravelVaultEncryption implements VaultEncryptionInterface
         } catch (CryptoOperationException $e) {
             throw $e;
         } catch (Throwable $e) {
-            throw new CryptoOperationException(
-                message: 'Encryption failed: '.$e->getMessage(),
-                previous: $e,
-            );
+            throw new CryptoOperationException(message: 'Encryption failed: '.$e->getMessage(), code: $e->getCode(), previous: $e);
         }
     }
 
@@ -63,14 +60,15 @@ final class LaravelVaultEncryption implements VaultEncryptionInterface
         try {
             $decrypted = $this->resolveEncrypter($tenantKey)->decrypt($encrypted);
 
-            return is_string($decrypted) ? $decrypted : (string) $decrypted;
+            if (! is_string($decrypted)) {
+                throw new CryptoOperationException('Decryption did not return a string value.');
+            }
+
+            return $decrypted;
         } catch (CryptoOperationException $e) {
             throw $e;
         } catch (Throwable $e) {
-            throw new CryptoOperationException(
-                message: 'Decryption failed: '.$e->getMessage(),
-                previous: $e,
-            );
+            throw new CryptoOperationException(message: 'Decryption failed: '.$e->getMessage(), code: $e->getCode(), previous: $e);
         }
     }
 
@@ -92,9 +90,9 @@ final class LaravelVaultEncryption implements VaultEncryptionInterface
             return $this->encrypter;
         }
 
-        $appKey = (string) config('app.key', '');
+        $appKey = config('app.key');
 
-        if ($appKey === '') {
+        if (! is_string($appKey) || $appKey === '') {
             throw new CryptoOperationException('Application key is not configured.');
         }
 
@@ -109,7 +107,8 @@ final class LaravelVaultEncryption implements VaultEncryptionInterface
 
         // Derive key length from the configured cipher so the Encrypter
         // constructor receives a key of the correct size.
-        $cipher = strtoupper((string) config('app.cipher', 'AES-256-CBC'));
+        $configuredCipher = config('app.cipher', 'AES-256-CBC');
+        $cipher = strtoupper(is_string($configuredCipher) ? $configuredCipher : 'AES-256-CBC');
         $keyLength = str_starts_with($cipher, 'AES-128') ? 16 : 32;
 
         $derivedKey = hash_hkdf(

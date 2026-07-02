@@ -1,10 +1,8 @@
 includes:
-    - ../../../vendor/larastan/larastan/extension.neon
+    - vendor/larastan/larastan/extension.neon
 
 parameters:
-    level: 8
+    level: max
     paths:
         - src
-    ignoreErrors:
-        # HasVault is a consumer-facing trait; it will be used in host applications.
-        - identifier: trait.unused
+    tmpDir: .phpstan.cache

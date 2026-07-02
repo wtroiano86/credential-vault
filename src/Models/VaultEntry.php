@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
+use Override;
 use Skillcraft\CredentialVault\Contracts\VaultEntryInterface;
 
 /**
@@ -34,9 +35,12 @@ class VaultEntry extends Model implements VaultEntryInterface
     /**
      * Get the table associated with the model.
      */
+    #[Override]
     public function getTable(): string
     {
-        return 'vault_entries';
+        $table = config('packages.credential-vault.general.table', 'scp_vault_entries');
+
+        return is_string($table) ? $table : 'scp_vault_entries';
     }
 
     /**
@@ -44,6 +48,7 @@ class VaultEntry extends Model implements VaultEntryInterface
      *
      * @return list<string>
      */
+    #[Override]
     public function getFillable(): array
     {
         return [
@@ -62,6 +67,7 @@ class VaultEntry extends Model implements VaultEntryInterface
      *
      * @return list<string>
      */
+    #[Override]
     public function getHidden(): array
     {
         return [
@@ -74,6 +80,7 @@ class VaultEntry extends Model implements VaultEntryInterface
      *
      * @return array<string, string>
      */
+    #[Override]
     protected function casts(): array
     {
         return [
@@ -86,11 +93,10 @@ class VaultEntry extends Model implements VaultEntryInterface
     /**
      * Get the owning model for this vault entry.
      *
-     * @return MorphTo<Model, self>
+     * @return MorphTo<Model, $this>
      */
     public function owner(): MorphTo
     {
-        // @phpstan-ignore return.type (PHPStan cannot unify self with $this for non-covariant TDeclaringModel)
         return $this->morphTo();
     }
 
@@ -113,7 +119,19 @@ class VaultEntry extends Model implements VaultEntryInterface
     {
         $metadata = $this->getAttribute('metadata');
 
-        return is_array($metadata) ? $metadata : [];
+        if (! is_array($metadata)) {
+            return [];
+        }
+
+        $normalized = [];
+
+        foreach ($metadata as $key => $value) {
+            if (is_string($key)) {
+                $normalized[$key] = $value;
+            }
+        }
+
+        return $normalized;
     }
 
     /**
@@ -143,6 +161,6 @@ class VaultEntry extends Model implements VaultEntryInterface
     {
         $expiresAt = $this->getExpiresAt();
 
-        return $expiresAt !== null && $expiresAt->getTimestamp() <= time();
+        return $expiresAt instanceof DateTimeInterface && $expiresAt->getTimestamp() <= time();
     }
 }

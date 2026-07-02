@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:noNamespaceSchemaLocation="../../../vendor/phpunit/phpunit/phpunit.xsd"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
          bootstrap="tests/bootstrap.php"
          colors="true"
+         failOnRisky="true"
+         failOnWarning="true"
+         cacheDirectory=".phpunit.cache"
 >
     <testsuites>
         <testsuite name="Unit">
@@ -27,8 +30,7 @@
     <php>
         <env name="APP_ENV" value="testing"/>
         <env name="APP_RUNNING_IN_CONSOLE" value="false"/>
-        <env name="CMS_TEST_LOAD_ALL_PLUGINS" value="true"/>
-        <env name="DB_CONNECTION" value="sqlite"/>
+        <env name="DB_CONNECTION" value="testing"/>
         <env name="DB_DATABASE" value=":memory:"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
@@ -38,9 +40,5 @@
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
-        <env name="METRICS_AUTO_DISCOVER_MODELS" value="false"/>
-        <ini name="memory_limit" value="32G"/>
-        <env name="CMS_MEMORY_LIMIT" value="16G"/>
-        <ini name="max_execution_time" value="3600"/>
     </php>
 </phpunit>

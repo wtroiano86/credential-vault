@@ -8,4 +8,5 @@ composer.lock
 build
 html-coverage
 .phpunit.cache
+.phpstan.cache
 .idea

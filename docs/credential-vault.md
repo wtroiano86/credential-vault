@@ -144,7 +144,7 @@ Unique index on `(owner_type, owner_id, key_name)`. Additional indexes may be ad
 
 **Merged file:** `config/general.php` in the package; when published, merged under:
 
-`config('packages.skillcraft-credential-vault.general.{key}')`
+`config('packages.credential-vault.general.{key}')`
 
 Shape (see repository `config/general.php` for the live default):
 
@@ -159,7 +159,7 @@ return [
         'encryption' => \Skillcraft\CredentialVault\Services\LaravelVaultEncryption::class,
     ],
 
-    'table' => 'vault_entries',
+    'table' => 'scp_vault_entries',
     'model' => \Skillcraft\CredentialVault\Models\VaultEntry::class,
 
     'encryption' => [
@@ -207,7 +207,7 @@ Payloads never include the secret value.
 
 **Class:** `Skillcraft\CredentialVault\Providers\CredentialVaultServiceProvider`
 
-- Uses `LoadAndPublishDataTrait` with namespace `packages/skillcraft-credential-vault`.
+- Uses `LoadAndPublishDataTrait` with namespace `packages/credential-vault`.
 - **`register()`:** Sets package base path, merges/publishes `general` config, registers singletons for `VaultEncryptionInterface` and `VaultServiceInterface` (class names from config, with package defaults).
 - **`boot()`:** `loadMigrations(publish: true)` so migrations run from the package and can be published with tag `skillcraft-credential-vault-migrations`.
 
