@@ -303,13 +303,7 @@ final readonly class VaultService implements VaultServiceInterface
             return config($legacyKey);
         }
 
-        $currentKey = self::CONFIG_PREFIX.'.'.$key;
-
-        if (config()->has($currentKey)) {
-            return config($currentKey);
-        }
-
-        return $default;
+        return config(self::CONFIG_PREFIX.'.'.$key, $default);
     }
 
     /**
