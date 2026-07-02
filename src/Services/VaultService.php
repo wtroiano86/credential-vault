@@ -31,6 +31,8 @@ final readonly class VaultService implements VaultServiceInterface
      */
     private const CONFIG_PREFIX = 'packages.credential-vault.general';
 
+    private const LEGACY_CONFIG_PREFIX = 'packages.skillcraft-credential-vault.general';
+
     public function __construct(
         private VaultEncryptionInterface $encryption,
         private Dispatcher $events,
@@ -295,7 +297,19 @@ final readonly class VaultService implements VaultServiceInterface
      */
     private function config(string $key, mixed $default = null): mixed
     {
-        return config(self::CONFIG_PREFIX.'.'.$key, $default);
+        $legacyKey = self::LEGACY_CONFIG_PREFIX.'.'.$key;
+
+        if (config()->has($legacyKey)) {
+            return config($legacyKey);
+        }
+
+        $currentKey = self::CONFIG_PREFIX.'.'.$key;
+
+        if (config()->has($currentKey)) {
+            return config($currentKey);
+        }
+
+        return $default;
     }
 
     /**

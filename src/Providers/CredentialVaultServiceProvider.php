@@ -27,6 +27,10 @@ final class CredentialVaultServiceProvider extends ServiceProvider
 {
     use LoadAndPublishDataTrait;
 
+    private const CONFIG_PREFIX = 'packages.credential-vault.general';
+
+    private const LEGACY_CONFIG_PREFIX = 'packages.skillcraft-credential-vault.general';
+
     /**
      * Register package bindings in the container.
      *
@@ -46,10 +50,7 @@ final class CredentialVaultServiceProvider extends ServiceProvider
             VaultEncryptionInterface::class,
             static function (Application $app): VaultEncryptionInterface {
                 /** @var class-string<VaultEncryptionInterface> $class */
-                $class = config(
-                    'packages.credential-vault.general.services.encryption',
-                    LaravelVaultEncryption::class,
-                );
+                $class = self::config('services.encryption', LaravelVaultEncryption::class);
 
                 $resolved = $app->make($class);
 
@@ -67,10 +68,7 @@ final class CredentialVaultServiceProvider extends ServiceProvider
             VaultServiceInterface::class,
             static function (Application $app): VaultServiceInterface {
                 /** @var class-string<VaultServiceInterface> $class */
-                $class = config(
-                    'packages.credential-vault.general.services.vault',
-                    VaultService::class,
-                );
+                $class = self::config('services.vault', VaultService::class);
 
                 $resolved = $app->make($class);
 
@@ -93,5 +91,22 @@ final class CredentialVaultServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->loadMigrations(publish: true);
+    }
+
+    private static function config(string $key, mixed $default = null): mixed
+    {
+        $legacyKey = self::LEGACY_CONFIG_PREFIX.'.'.$key;
+
+        if (config()->has($legacyKey)) {
+            return config($legacyKey);
+        }
+
+        $currentKey = self::CONFIG_PREFIX.'.'.$key;
+
+        if (config()->has($currentKey)) {
+            return config($currentKey);
+        }
+
+        return $default;
     }
 }
