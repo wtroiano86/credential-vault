@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Skillcraft\CredentialVault\Providers;
 
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
+use Override;
 use Skillcraft\CredentialVault\Contracts\VaultEncryptionInterface;
 use Skillcraft\CredentialVault\Contracts\VaultServiceInterface;
+use Skillcraft\CredentialVault\Exceptions\ConfigurationException;
 use Skillcraft\CredentialVault\Services\LaravelVaultEncryption;
 use Skillcraft\CredentialVault\Services\VaultService;
 use Skillcraft\Support\Traits\LoadAndPublishDataTrait;
@@ -30,6 +33,7 @@ final class CredentialVaultServiceProvider extends ServiceProvider
      * Config is merged here so values are available to other providers that
      * run after this one.
      */
+    #[Override]
     public function register(): void
     {
         // The provider lives at src/Providers; go up two levels to reach the
@@ -40,29 +44,43 @@ final class CredentialVaultServiceProvider extends ServiceProvider
 
         $this->app->singleton(
             VaultEncryptionInterface::class,
-            static function ($app): VaultEncryptionInterface {
+            static function (Application $app): VaultEncryptionInterface {
                 /** @var class-string<VaultEncryptionInterface> $class */
                 $class = config(
                     'packages.skillcraft-credential-vault.general.services.encryption',
                     LaravelVaultEncryption::class,
                 );
 
-                /** @var VaultEncryptionInterface */
-                return $app->make($class);
+                $resolved = $app->make($class);
+
+                if (! $resolved instanceof VaultEncryptionInterface) {
+                    throw new ConfigurationException(
+                        "Encryption service [{$class}] must implement ".VaultEncryptionInterface::class.'.'
+                    );
+                }
+
+                return $resolved;
             },
         );
 
         $this->app->singleton(
             VaultServiceInterface::class,
-            static function ($app): VaultServiceInterface {
+            static function (Application $app): VaultServiceInterface {
                 /** @var class-string<VaultServiceInterface> $class */
                 $class = config(
                     'packages.skillcraft-credential-vault.general.services.vault',
                     VaultService::class,
                 );
 
-                /** @var VaultServiceInterface */
-                return $app->make($class);
+                $resolved = $app->make($class);
+
+                if (! $resolved instanceof VaultServiceInterface) {
+                    throw new ConfigurationException(
+                        "Vault service [{$class}] must implement ".VaultServiceInterface::class.'.'
+                    );
+                }
+
+                return $resolved;
             },
         );
     }

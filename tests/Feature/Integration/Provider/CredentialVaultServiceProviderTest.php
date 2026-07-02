@@ -9,6 +9,7 @@ use Mockery;
 use Skillcraft\CredentialVault\Contracts\VaultEncryptionInterface;
 use Skillcraft\CredentialVault\Contracts\VaultEntryInterface;
 use Skillcraft\CredentialVault\Contracts\VaultServiceInterface;
+use Skillcraft\CredentialVault\Exceptions\ConfigurationException;
 use Skillcraft\CredentialVault\Providers\CredentialVaultServiceProvider;
 use Skillcraft\CredentialVault\Services\LaravelVaultEncryption;
 use Tests\Unit\Packages\SkillcraftCredentialVault\CredentialVaultTestCase;
@@ -124,12 +125,38 @@ final class CredentialVaultServiceProviderTest extends CredentialVaultTestCase
 
     public function test_boot_loads_vault_entries_migration_file(): void
     {
-        $migrationPath = base_path('platform/packages/skillcraft-credential-vault/database/migrations/2026_02_21_000000_create_vault_entries_table.php');
+        $migrationPath = dirname(__DIR__, 4).'/database/migrations/2026_02_21_000000_create_vault_entries_table.php';
 
-        $migrationFile = realpath($migrationPath);
+        $this->assertFileExists($migrationPath);
+    }
 
-        $this->assertNotFalse($migrationFile);
-        $this->assertIsString($migrationFile);
-        $this->assertFileExists($migrationFile);
+    public function test_encryption_binding_throws_configuration_exception_for_invalid_class(): void
+    {
+        config(['packages.skillcraft-credential-vault.general.services.encryption' => \stdClass::class]);
+
+        app()->forgetInstance(VaultEncryptionInterface::class);
+
+        $provider = new CredentialVaultServiceProvider(app());
+        $provider->register();
+
+        $this->expectException(ConfigurationException::class);
+        $this->expectExceptionMessage(VaultEncryptionInterface::class);
+
+        app(VaultEncryptionInterface::class);
+    }
+
+    public function test_vault_binding_throws_configuration_exception_for_invalid_class(): void
+    {
+        config(['packages.skillcraft-credential-vault.general.services.vault' => \stdClass::class]);
+
+        app()->forgetInstance(VaultServiceInterface::class);
+
+        $provider = new CredentialVaultServiceProvider(app());
+        $provider->register();
+
+        $this->expectException(ConfigurationException::class);
+        $this->expectExceptionMessage(VaultServiceInterface::class);
+
+        app(VaultServiceInterface::class);
     }
 }

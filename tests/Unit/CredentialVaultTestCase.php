@@ -6,7 +6,7 @@ namespace Tests\Unit\Packages\SkillcraftCredentialVault;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Mockery;
-use Tests\TestCase;
+use Skillcraft\CredentialVault\Tests\TestCase;
 
 abstract class CredentialVaultTestCase extends TestCase
 {
