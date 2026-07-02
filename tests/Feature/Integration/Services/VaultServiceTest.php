@@ -123,7 +123,7 @@ final class VaultServiceTest extends CredentialVaultIntegrationTestCase
 
     public function test_retrieve_returns_value_for_expired_entry_when_expired_return_null_false(): void
     {
-        config(['packages.skillcraft-credential-vault.general.expired.return_null' => false]);
+        config(['packages.credential-vault.general.expired.return_null' => false]);
 
         $owner = VaultTestModels::owner();
         $this->service->store($owner, 'temp_token', 'tok');
@@ -148,7 +148,7 @@ final class VaultServiceTest extends CredentialVaultIntegrationTestCase
 
     public function test_retrieve_dispatches_credential_accessed_when_audit_enabled(): void
     {
-        config(['packages.skillcraft-credential-vault.general.audit.enabled' => true]);
+        config(['packages.credential-vault.general.audit.enabled' => true]);
         Event::fake([CredentialAccessed::class]);
 
         $owner = VaultTestModels::owner('App\\Models\\User', 'user-77');
@@ -401,7 +401,7 @@ final class VaultServiceTest extends CredentialVaultIntegrationTestCase
 
     public function test_validate_key_via_store_when_allowed_key_patterns_empty_throws(): void
     {
-        config(['packages.skillcraft-credential-vault.general.allowed_key_patterns' => []]);
+        config(['packages.credential-vault.general.allowed_key_patterns' => []]);
 
         $owner = VaultTestModels::owner();
 

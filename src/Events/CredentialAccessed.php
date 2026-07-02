@@ -8,7 +8,7 @@ namespace Skillcraft\CredentialVault\Events;
  * Fired when a credential has been read from the vault.
  *
  * This event is only dispatched when audit logging is enabled
- * (see `packages.skillcraft-credential-vault.general.audit.enabled`).
+ * (see `packages.credential-vault.general.audit.enabled`).
  * Does not carry the decrypted value to prevent sensitive-data leakage.
  */
 final readonly class CredentialAccessed

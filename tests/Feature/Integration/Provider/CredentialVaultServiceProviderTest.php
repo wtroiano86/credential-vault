@@ -47,7 +47,7 @@ final class CredentialVaultServiceProviderTest extends CredentialVaultTestCase
 
         app()->bind($customClassName, fn () => $customClass);
 
-        config(['packages.skillcraft-credential-vault.general.services.encryption' => $customClassName]);
+        config(['packages.credential-vault.general.services.encryption' => $customClassName]);
 
         app()->forgetInstance(VaultEncryptionInterface::class);
 
@@ -110,7 +110,7 @@ final class CredentialVaultServiceProviderTest extends CredentialVaultTestCase
 
         app()->bind($customClassName, fn () => $customClass);
 
-        config(['packages.skillcraft-credential-vault.general.services.vault' => $customClassName]);
+        config(['packages.credential-vault.general.services.vault' => $customClassName]);
 
         app()->forgetInstance(VaultServiceInterface::class);
 
@@ -124,7 +124,7 @@ final class CredentialVaultServiceProviderTest extends CredentialVaultTestCase
 
     public function test_boot_loads_vault_entries_migration_file(): void
     {
-        $migrationPath = base_path('platform/packages/skillcraft-credential-vault/database/migrations/2026_02_21_000000_create_vault_entries_table.php');
+        $migrationPath = base_path('platform/packages/credential-vault/database/migrations/2026_02_21_000000_create_vault_entries_table.php');
 
         $migrationFile = realpath($migrationPath);
 

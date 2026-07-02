@@ -22,7 +22,7 @@ Publish the merged config (optional; defaults are merged from the package):
 php artisan vendor:publish --tag=skillcraft-credential-vault-config
 ```
 
-Values are read as `config('packages.skillcraft-credential-vault.general.*')`.
+Values are read as `config('packages.credential-vault.general.*')`.
 
 ## Database
 

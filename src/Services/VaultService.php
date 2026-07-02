@@ -29,7 +29,7 @@ final class VaultService implements VaultServiceInterface
     /**
      * Config key prefix for this package.
      */
-    private const CONFIG_PREFIX = 'packages.skillcraft-credential-vault.general';
+    private const CONFIG_PREFIX = 'packages.credential-vault.general';
 
     public function __construct(
         private readonly VaultEncryptionInterface $encryption,

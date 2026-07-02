@@ -14,7 +14,7 @@ final class VaultEntryTest extends CredentialVaultTestCase
 {
     public function test_returns_the_correct_table_name(): void
     {
-        $this->assertSame('vault_entries', (new VaultEntry)->getTable());
+        $this->assertSame('scp_vault_entries', (new VaultEntry)->getTable());
     }
 
     public function test_get_fillable_returns_all_expected_fillable_fields_in_order(): void
