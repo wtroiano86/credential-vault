@@ -11,6 +11,7 @@ use Skillcraft\CredentialVault\Events\CredentialDeleted;
 use Skillcraft\CredentialVault\Events\CredentialRotated;
 use Skillcraft\CredentialVault\Events\CredentialStored;
 use Skillcraft\CredentialVault\Exceptions\CredentialNotFoundException;
+use Skillcraft\CredentialVault\Exceptions\CryptoOperationException;
 use Skillcraft\CredentialVault\Exceptions\InvalidCredentialKeyException;
 use Skillcraft\CredentialVault\Models\VaultEntry;
 use Skillcraft\CredentialVault\Services\VaultService;
@@ -410,14 +411,15 @@ final class VaultServiceTest extends CredentialVaultIntegrationTestCase
         $this->service->store($owner, 'ANY-KEY', 'v');
     }
 
-    public function test_retrieve_returns_null_when_encrypted_value_is_not_a_string(): void
+    public function test_retrieve_rejects_encrypted_value_that_is_not_a_string(): void
     {
         config(['packages.skillcraft-credential-vault.general.model' => CorruptEncryptedValueVaultEntry::class]);
 
         $owner = VaultTestModels::owner();
         $this->service->store($owner, 'api_key', 'secret');
 
-        $this->assertNull($this->service->retrieve($owner, 'api_key'));
+        $this->expectException(CryptoOperationException::class);
+        $this->service->retrieve($owner, 'api_key');
     }
 
     public function test_vault_entry_class_falls_back_to_default_when_model_config_is_invalid(): void

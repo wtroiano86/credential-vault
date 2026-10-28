@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Skillcraft\CredentialVault\Contracts;
 
 use Illuminate\Database\Eloquent\Model;
+use SensitiveParameter;
 
 /**
  * Defines core lifecycle operations for credential vault management.
@@ -16,7 +17,7 @@ interface VaultServiceInterface
      *
      * @param  array<string, mixed>  $metadata
      */
-    public function store(Model $owner, string $key, string $value, array $metadata = []): VaultEntryInterface;
+    public function store(Model $owner, string $key, #[SensitiveParameter] string $value, array $metadata = []): VaultEntryInterface;
 
     /**
      * Retrieve a decrypted credential value.
@@ -31,7 +32,7 @@ interface VaultServiceInterface
     /**
      * Rotate an existing credential with a new value.
      */
-    public function rotate(Model $owner, string $key, string $newValue): VaultEntryInterface;
+    public function rotate(Model $owner, string $key, #[SensitiveParameter] string $newValue): VaultEntryInterface;
 
     /**
      * Check whether a credential exists for an owner and key.

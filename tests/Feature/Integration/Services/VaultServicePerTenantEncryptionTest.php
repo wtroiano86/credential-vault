@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Packages\SkillcraftCredentialVault\Integration\Services;
 
 use Illuminate\Database\Eloquent\Model;
+use Skillcraft\CredentialVault\Exceptions\InvalidVaultOwnerException;
 use Tests\Feature\Packages\SkillcraftCredentialVault\CredentialVaultIntegrationTestCase;
 use Tests\Feature\Packages\SkillcraftCredentialVault\Support\VaultTestModels;
 
@@ -40,7 +41,7 @@ final class VaultServicePerTenantEncryptionTest extends CredentialVaultIntegrati
         $this->assertNull($this->service->retrieve($ownerB, 'api_key'));
     }
 
-    public function test_per_tenant_key_returns_null_when_owner_primary_key_is_null(): void
+    public function test_rejects_owner_when_owner_primary_key_is_null(): void
     {
         $owner = new class extends Model
         {
@@ -57,12 +58,11 @@ final class VaultServicePerTenantEncryptionTest extends CredentialVaultIntegrati
             }
         };
 
+        $this->expectException(InvalidVaultOwnerException::class);
         $this->service->store($owner, 'api_key', 'tenant-secret');
-
-        $this->assertSame('tenant-secret', $this->service->retrieve($owner, 'api_key'));
     }
 
-    public function test_per_tenant_key_returns_null_when_owner_primary_key_is_non_scalar(): void
+    public function test_rejects_owner_when_owner_primary_key_is_non_scalar(): void
     {
         $owner = new class extends Model
         {
@@ -79,8 +79,7 @@ final class VaultServicePerTenantEncryptionTest extends CredentialVaultIntegrati
             }
         };
 
+        $this->expectException(InvalidVaultOwnerException::class);
         $this->service->store($owner, 'api_key', 'tenant-secret');
-
-        $this->assertSame('tenant-secret', $this->service->retrieve($owner, 'api_key'));
     }
 }

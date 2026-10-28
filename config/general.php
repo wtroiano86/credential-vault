@@ -16,6 +16,7 @@ return [
 
     'encryption' => [
         'per_tenant_key' => false,
+        'allow_legacy' => false,
     ],
 
     'expired' => [
@@ -28,6 +29,6 @@ return [
     ],
 
     'allowed_key_patterns' => [
-        '/^[a-z][a-z0-9_]{1,98}[a-z0-9]$/',
+        '/\A[a-z][a-z0-9_]{1,98}[a-z0-9]\z/',
     ],
 ];

@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace Tests\Feature\Packages\SkillcraftCredentialVault\Integration\Provider;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\ServiceProvider;
 use Mockery;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Skillcraft\CredentialVault\Contracts\VaultEncryptionInterface;
 use Skillcraft\CredentialVault\Contracts\VaultEntryInterface;
 use Skillcraft\CredentialVault\Contracts\VaultServiceInterface;
@@ -16,6 +19,56 @@ use Tests\Unit\Packages\SkillcraftCredentialVault\CredentialVaultTestCase;
 
 final class CredentialVaultServiceProviderTest extends CredentialVaultTestCase
 {
+    public function test_register_merges_default_config_without_overwriting_application_values(): void
+    {
+        config(['packages.credential-vault.general' => ['table' => 'custom_vault_entries']]);
+
+        $provider = new CredentialVaultServiceProvider(app());
+        $provider->register();
+
+        $this->assertSame('custom_vault_entries', config('packages.credential-vault.general.table'));
+        $this->assertSame(LaravelVaultEncryption::class, config('packages.credential-vault.general.services.encryption'));
+        $this->assertTrue(config('packages.credential-vault.general.audit.enabled'));
+    }
+
+    #[DataProvider('configPublishTags')]
+    public function test_config_can_be_published_using_supported_tags(string $tag): void
+    {
+        $this->assertSame([
+            dirname(__DIR__, 4).'/config/general.php' => config_path('packages.credential-vault.general.php'),
+        ], ServiceProvider::pathsToPublish(CredentialVaultServiceProvider::class, $tag));
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function configPublishTags(): array
+    {
+        return [
+            'existing tag' => ['credential-vault-config'],
+            'documented tag' => ['skillcraft-credential-vault-config'],
+        ];
+    }
+
+    #[DataProvider('migrationPublishTags')]
+    public function test_migrations_can_be_published_using_supported_tags(string $tag): void
+    {
+        $this->assertSame([
+            dirname(__DIR__, 4).'/database/migrations' => database_path('migrations'),
+        ], ServiceProvider::pathsToPublish(CredentialVaultServiceProvider::class, $tag));
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function migrationPublishTags(): array
+    {
+        return [
+            'existing tag' => ['credential-vault-migrations'],
+            'documented tag' => ['skillcraft-credential-vault-migrations'],
+        ];
+    }
+
     public function test_vault_encryption_interface_resolves_to_default_laravel_vault_encryption_class(): void
     {
         $this->assertInstanceOf(LaravelVaultEncryption::class, app(VaultEncryptionInterface::class));
@@ -123,11 +176,11 @@ final class CredentialVaultServiceProviderTest extends CredentialVaultTestCase
         $this->assertInstanceOf(VaultServiceInterface::class, $resolved);
     }
 
-    public function test_boot_loads_vault_entries_migration_file(): void
+    public function test_boot_loads_and_runs_package_migrations(): void
     {
-        $migrationPath = dirname(__DIR__, 4).'/database/migrations/2026_02_21_000000_create_vault_entries_table.php';
-
-        $this->assertFileExists($migrationPath);
+        $this->assertContains(dirname(__DIR__, 4).'/database/migrations', app('migrator')->paths());
+        $this->assertTrue(Schema::hasTable('scp_vault_entries'));
+        $this->assertTrue(Schema::hasIndex('scp_vault_entries', 'vault_entries_owner_index'));
     }
 
     public function test_encryption_binding_throws_configuration_exception_for_invalid_class(): void

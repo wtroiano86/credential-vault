@@ -7,12 +7,12 @@ namespace Skillcraft\CredentialVault\Providers;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
 use Override;
+use Skillcraft\CredentialVault\Console\UpgradeEncryption;
 use Skillcraft\CredentialVault\Contracts\VaultEncryptionInterface;
 use Skillcraft\CredentialVault\Contracts\VaultServiceInterface;
 use Skillcraft\CredentialVault\Exceptions\ConfigurationException;
 use Skillcraft\CredentialVault\Services\LaravelVaultEncryption;
 use Skillcraft\CredentialVault\Services\VaultService;
-use Skillcraft\Support\Traits\LoadAndPublishDataTrait;
 
 /**
  * Service provider for the Skillcraft Credential Vault package.
@@ -25,11 +25,9 @@ use Skillcraft\Support\Traits\LoadAndPublishDataTrait;
  */
 final class CredentialVaultServiceProvider extends ServiceProvider
 {
-    use LoadAndPublishDataTrait;
+    private const string CONFIG_PREFIX = 'packages.credential-vault.general';
 
-    private const CONFIG_PREFIX = 'packages.credential-vault.general';
-
-    private const LEGACY_CONFIG_PREFIX = 'packages.skillcraft-credential-vault.general';
+    private const string LEGACY_CONFIG_PREFIX = 'packages.skillcraft-credential-vault.general';
 
     /**
      * Register package bindings in the container.
@@ -40,11 +38,7 @@ final class CredentialVaultServiceProvider extends ServiceProvider
     #[Override]
     public function register(): void
     {
-        // The provider lives at src/Providers; go up two levels to reach the
-        // package root where config/ and database/ directories live.
-        $this->setBasePath(dirname(__DIR__, 2))
-            ->setNamespace('packages/credential-vault')
-            ->loadAndPublishConfigurations(['general']);
+        $this->mergeConfigFrom(dirname(__DIR__, 2).'/config/general.php', self::CONFIG_PREFIX);
 
         $this->app->singleton(
             VaultEncryptionInterface::class,
@@ -90,7 +84,19 @@ final class CredentialVaultServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        $this->loadMigrations(publish: true);
+        $this->commands([UpgradeEncryption::class]);
+
+        $basePath = dirname(__DIR__, 2);
+
+        $this->loadMigrationsFrom($basePath.'/database/migrations');
+
+        $this->publishes([
+            $basePath.'/config/general.php' => $this->app->configPath(self::CONFIG_PREFIX.'.php'),
+        ], ['credential-vault-config', 'skillcraft-credential-vault-config']);
+
+        $this->publishes([
+            $basePath.'/database/migrations' => $this->app->databasePath('migrations'),
+        ], ['credential-vault-migrations', 'skillcraft-credential-vault-migrations']);
     }
 
     private static function config(string $key, mixed $default = null): mixed

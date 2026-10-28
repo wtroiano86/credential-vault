@@ -6,6 +6,7 @@ namespace Skillcraft\CredentialVault\Services;
 
 use Illuminate\Contracts\Encryption\Encrypter as EncrypterContract;
 use Illuminate\Encryption\Encrypter;
+use SensitiveParameter;
 use Skillcraft\CredentialVault\Contracts\VaultEncryptionInterface;
 use Skillcraft\CredentialVault\Exceptions\CryptoOperationException;
 use Throwable;
@@ -15,11 +16,15 @@ use Throwable;
  *
  * Wraps the application's configured Encrypter for default usage, and derives
  * a per-tenant Encrypter via HKDF when `per_tenant_key` is enabled.  The
- * tenant key is the owner's primary key value; the actual cryptographic key is
+ * tenant key is the credential context (the owner ID for legacy ciphertext); the actual cryptographic key is
  * derived internally — it is never stored or returned.
  */
 final readonly class LaravelVaultEncryption implements VaultEncryptionInterface
 {
+    private const string PREFIX = 'scv1:';
+
+    private const string MAGIC = "skillcraft-credential-vault:string:v1\n";
+
     public function __construct(
         private EncrypterContract $encrypter,
     ) {}
@@ -28,17 +33,17 @@ final readonly class LaravelVaultEncryption implements VaultEncryptionInterface
      * Encrypt a plaintext credential value.
      *
      * @param  string  $value  Plaintext credential to encrypt.
-     * @param  string|null  $tenantKey  Owner primary-key value used to derive
+     * @param  string|null  $tenantKey  Credential context used to derive
      *                                  a per-tenant crypto key.  Null uses the
      *                                  application's default encrypter.
      * @return string Encrypted payload.
      *
      * @throws CryptoOperationException On any encryption failure.
      */
-    public function encrypt(string $value, ?string $tenantKey = null): string
+    public function encrypt(#[SensitiveParameter] string $value, ?string $tenantKey = null): string
     {
         try {
-            return $this->resolveEncrypter($tenantKey)->encrypt($value);
+            return self::PREFIX.$this->resolveEncrypter($tenantKey)->encrypt(self::MAGIC.$value, false);
         } catch (CryptoOperationException $e) {
             throw $e;
         } catch (Throwable $e) {
@@ -58,18 +63,39 @@ final readonly class LaravelVaultEncryption implements VaultEncryptionInterface
     public function decrypt(string $encrypted, ?string $tenantKey = null): string
     {
         try {
-            $decrypted = $this->resolveEncrypter($tenantKey)->decrypt($encrypted);
+            $versioned = str_starts_with($encrypted, self::PREFIX);
+            $payload = $versioned ? substr($encrypted, strlen(self::PREFIX)) : $encrypted;
+            $decrypted = $this->resolveEncrypter($tenantKey)->decrypt($payload, false);
 
             if (! is_string($decrypted)) {
                 throw new CryptoOperationException('Decryption did not return a string value.');
             }
 
-            return $decrypted;
+            if ($versioned) {
+                if (! str_starts_with($decrypted, self::MAGIC)) {
+                    throw new CryptoOperationException('Invalid ciphertext format.');
+                }
+
+                return substr($decrypted, strlen(self::MAGIC));
+            }
+
+            return $this->decodeLegacyString($decrypted);
         } catch (CryptoOperationException $e) {
             throw $e;
         } catch (Throwable $e) {
             throw new CryptoOperationException(message: 'Decryption failed: '.$e->getMessage(), code: $e->getCode(), previous: $e);
         }
+    }
+
+    /** Decode only PHP's serialized string format, without invoking unserialize. */
+    private function decodeLegacyString(#[SensitiveParameter] string $serialized): string
+    {
+        if (preg_match('/\As:(0|[1-9][0-9]*):"(.*)";\z/s', $serialized, $matches) !== 1
+            || (string) strlen($matches[2]) !== $matches[1]) {
+            throw new CryptoOperationException('Legacy ciphertext does not contain a serialized string.');
+        }
+
+        return $matches[2];
     }
 
     /**
@@ -80,7 +106,7 @@ final readonly class LaravelVaultEncryption implements VaultEncryptionInterface
      * from the application key and the tenant identifier, then a fresh
      * Encrypter is constructed with that key and the application's cipher.
      *
-     * @param  string|null  $tenantKey  Owner primary-key value.
+     * @param  string|null  $tenantKey  Credential context (owner ID for legacy ciphertext).
      *
      * @throws CryptoOperationException When the application key cannot be read.
      */

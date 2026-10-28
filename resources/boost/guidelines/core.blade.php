@@ -2,6 +2,12 @@
 
 Encrypted per-tenant credential storage for Laravel. Stores third-party API keys and secrets encrypted at rest, scoped to any polymorphic owner (Workspace, Team, User), with built-in rotation, expiry, and audit event dispatch.
 
+Requires PHP 8.4+ (8.x) and Laravel / Illuminate 13.x. The default table is `scp_vault_entries`; per-owner encryption key derivation is optional and disabled by default.
+
+### Skills
+
+When installed through Boost, use `credential-vault-development` for application integration, `credential-vault-encryption-upgrades` for legacy ciphertext migration or decryption failures, and `credential-vault-agent-tools` for Laravel AI SDK tool integration. Package reference docs are under `vendor/skillcraft/credential-vault/docs/` in consuming applications, or `docs/` in the package repository. Boost skills guide development; they do not register runtime AI tools.
+
 ### Installation
 
 @verbatim
@@ -24,27 +30,33 @@ php artisan migrate
 
 ### Configuration
 
-Config is accessed via `config('packages.credential-vault.general.{key}')`.
+Config is accessed via `config('packages.credential-vault.general.{key}')`. Defaults are merged even without publishing. The published file is `config/packages.credential-vault.general.php`. Existing `credential-vault-config` and `credential-vault-migrations` publish tags remain supported alongside the `skillcraft-credential-vault-*` tags.
+
+The service and provider give existing `packages.skillcraft-credential-vault.general.{key}` legacy values precedence; remove stale legacy overrides when migrating config. The entry model and migrations use only the current namespace for `table`.
 
 @verbatim
 <code-snippet name="Key configuration options" lang="php">
-// config/general.php (published)
+// Selected options from config/packages.credential-vault.general.php
 return [
+    'table' => 'scp_vault_entries',
+    'model' => \Skillcraft\CredentialVault\Models\VaultEntry::class,
+
     'encryption' => [
-        'per_tenant_key' => false, // true = HKDF-derived key per owner
+        'per_tenant_key' => false, // true = HKDF-derived key per credential context
+        'allow_legacy' => false,  // temporary compatibility during a controlled upgrade only
     ],
 
     'audit' => [
-        'enabled' => true,         // dispatches CredentialAccessed events on retrieve
+        'enabled' => true,         // dispatches CredentialAccessed after successful decryption
         'log_channel' => null,     // reserved; use event listeners to log to a channel
     ],
 
     'allowed_key_patterns' => [
-        '/^[a-z][a-z0-9_]{1,98}[a-z0-9]$/', // keys must be snake_case, 3–100 chars
+        '/\A[a-z][a-z0-9_]{1,98}[a-z0-9]\z/', // 3–100 chars, lowercase starting letter
     ],
 
     'expired' => [
-        'return_null' => true,     // expired credentials return null instead of throwing
+        'return_null' => true,     // false allows expired credentials to be decrypted
     ],
 ];
 </code-snippet>
@@ -54,10 +66,11 @@ return [
 
 #### HasVault Trait — Credential Access on Owner Models
 
-Apply `HasVault` to any Eloquent model that owns credentials. All methods delegate to `VaultServiceInterface` automatically.
+Apply `HasVault` to any Eloquent model that owns credentials. Credential operations delegate to `VaultServiceInterface`; `vaultEntries()` returns a relationship to the base `VaultEntry` model. Use a persisted owner with a non-empty integer or string primary key on the same database connection as the configured vault entry model. All operations reject invalid owners with `InvalidVaultOwnerException`.
 
 @verbatim
 <code-snippet name="Apply HasVault to an owner model" lang="php">
+use Illuminate\Database\Eloquent\Model;
 use Skillcraft\CredentialVault\Traits\HasVault;
 
 class Workspace extends Model
@@ -66,6 +79,8 @@ class Workspace extends Model
 }
 </code-snippet>
 @endverbatim
+
+Alternatively, extend the abstract `Skillcraft\CredentialVault\Models\VaultOwner` model, which already includes `HasVault`.
 
 @verbatim
 <code-snippet name="Store, retrieve, and delete a credential via the trait" lang="php">
@@ -114,7 +129,7 @@ Vault::delete($workspace, 'github_token');
 
 #### Credential Rotation
 
-Rotation atomically replaces the encrypted value and timestamps `rotated_at`. Dispatches `CredentialRotated`.
+Rotation replaces the encrypted value, timestamps `rotated_at`, and dispatches `CredentialRotated`. It preserves metadata and `expires_at`, and throws `CredentialNotFoundException` when no non-deleted entry exists. Updating an active entry with `store()` replaces its metadata but does not stamp `rotated_at` or change expiry. Storing a deleted entry restores it and clears both timestamps.
 
 @verbatim
 <code-snippet name="Rotate a credential to a new value" lang="php">
@@ -130,7 +145,7 @@ echo $entry->getRotatedAt()?->format(DATE_ATOM); // timestamp of rotation
 
 #### List Credential Keys
 
-Returns key metadata only — the actual secret values are never included in the listing.
+Returns `key`, `metadata`, `created_at`, and `rotated_at` for every non-deleted entry, including expired entries. No `expires_at` field or explicit sort order is included. Credential values are omitted; caller-provided metadata must also be kept free of secrets.
 
 @verbatim
 <code-snippet name="List all credential keys for an owner" lang="php">
@@ -161,14 +176,14 @@ $entry = $workspace->vaultEntries()
     ->where('key_name', 'openai_api_key')
     ->first();
 
-echo $entry->getCredentialKey(); // 'openai_api_key' (not Eloquent getKey(), which is the ULID)
-echo $entry->isExpired();        // bool
+echo $entry?->getCredentialKey(); // 'openai_api_key' (getKey() returns the ULID)
+$expired = $entry?->isExpired();  // bool when found, null when absent
 </code-snippet>
 @endverbatim
 
 ### Credential Key Naming Rules
 
-Keys must match `/^[a-z][a-z0-9_]{1,98}[a-z0-9]$/` (snake_case, 3–100 chars, lowercase). Invalid keys throw `InvalidCredentialKeyException`.
+By default, keys must match `/\A[a-z][a-z0-9_]{1,98}[a-z0-9]\z/`: 3–100 characters, beginning with a lowercase letter, ending with a lowercase letter or digit, and containing only lowercase letters, digits, and underscores. Underscores are optional. Only `store()` and `rotate()` validate names and throw `InvalidCredentialKeyException`. A key must match at least one configured pattern; an empty pattern list rejects all stores and rotations.
 
 @verbatim
 <code-snippet name="Valid and invalid key names" lang="php">
@@ -176,26 +191,32 @@ Keys must match `/^[a-z][a-z0-9_]{1,98}[a-z0-9]$/` (snake_case, 3–100 chars, l
 $workspace->storeCredential('openai_api_key', $value);
 $workspace->storeCredential('stripe_secret_key', $value);
 $workspace->storeCredential('github_token', $value);
+$workspace->storeCredential('key', $value);           // three letters is valid
 
 // Invalid — throws InvalidCredentialKeyException
 $workspace->storeCredential('OpenAI_Key', $value);  // uppercase
 $workspace->storeCredential('my-key', $value);      // hyphens not allowed
-$workspace->storeCredential('key', $value);          // too short (< 3 chars total logic)
+$workspace->storeCredential('ok', $value);          // fewer than three characters
+$workspace->storeCredential('1key', $value);        // starts with a digit
 </code-snippet>
 @endverbatim
 
 ### Events
 
-All events carry `ownerType`, `ownerId`, and `key` — never the raw credential value.
+All events carry `ownerType`, `ownerId`, and `key` — never the raw credential value. Mutation events dispatch after the outermost transaction commits and are discarded on rollback. Model vetoes raise `CredentialPersistenceException`. Deleting a missing row emits no event. Access events follow successful decryption immediately.
+
+`CredentialAccessed` fires only after successful decryption when `audit.enabled` is true. `CredentialStored`, `CredentialRotated`, and `CredentialDeleted` are independent of that setting. Deleting a missing entry does not dispatch `CredentialDeleted`.
 
 @verbatim
 <code-snippet name="Listen to credential lifecycle events" lang="php">
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 use Skillcraft\CredentialVault\Events\CredentialStored;
 use Skillcraft\CredentialVault\Events\CredentialRotated;
 use Skillcraft\CredentialVault\Events\CredentialAccessed;
 use Skillcraft\CredentialVault\Events\CredentialDeleted;
 
-// In EventServiceProvider or a listener class
+// In your application service provider's boot() method
 Event::listen(CredentialStored::class, function (CredentialStored $event) {
     // $event->ownerType, $event->ownerId, $event->key
     Log::info("Credential stored: {$event->key} for {$event->ownerType}:{$event->ownerId}");
@@ -209,10 +230,23 @@ Event::listen(CredentialRotated::class, function (CredentialRotated $event) {
 
 ### Best Practices
 
-- **Do:** Use `hasCredential()` before `retrieveCredential()` in conditional logic to avoid null checks.
-- **Do:** Store metadata (provider name, label, scopes) alongside credentials to support future listing UIs.
-- **Do:** Use `rotateCredential()` / `Vault::rotate()` instead of delete + store to preserve `rotated_at` audit trail.
+- **Do:** Handle `null` from `retrieveCredential()` directly. `hasCredential()` checks existence, including expired entries, so it does not guarantee a value can be retrieved.
+- **Do:** Store non-sensitive metadata (provider name, label, scopes); it is stored as unencrypted JSON and returned in listings and DTOs.
+- **Do:** Use `rotateCredential()` / `Vault::rotate()` to replace an active credential and record the latest rotation time. `store()` restores soft-deleted rows with the replacement value and clears their expiry and rotation time.
+- **Do:** Set or renew `expires_at` explicitly when needed. Neither method reads expiry from metadata. Active updates preserve expiry; storing a deleted entry clears it.
 - **Do:** Use snake_case key names that describe the provider + purpose (e.g., `openai_api_key`, `stripe_webhook_secret`).
 - **Don't:** Store decrypted values in logs, session, cache, or DTO `jsonSerialize()` output — the package never does this.
 - **Don't:** Read `encrypted_value` directly from the model — always go through `Vault::retrieve()` or `retrieveCredential()`.
-- **Don't:** Use the `VaultEntry` model directly for writes — always use the service or trait to ensure encryption.
+- **Don't:** Write credential values directly through `VaultEntry`; use the service or trait for encryption and events. Direct model updates are needed to set expiry.
+
+### Security Upgrade
+
+New writes authenticate the owner type/ID, credential name, and connection/database/table context. Legacy reads are disabled by default. Before deploying to an existing database, pause credential traffic, back up data and keys, keep the original key/cipher/mode, and run `php artisan credential-vault:upgrade-encryption --dry-run` followed by `php artisan credential-vault:upgrade-encryption`. The command includes expired/deleted rows and is resumable; resolve all failures before resuming traffic. Keep `encryption.allow_legacy = false`; temporary compatibility reads retain the legacy substitution risk. Update published regex defaults to use `\A` and `\z`. See `docs/credential-vault.md` for the full upgrade procedure.
+
+Authorize owner access in the application. Keep secrets out of metadata, key names, and logs. Use `zend.exception_ignore_args = On` in production; package secret parameters are redacted, but custom callers/drivers also need protection. Context authentication does not prevent replay of old ciphertext for the same credential.
+
+### Production Laravel AI Agents
+
+With the optional `laravel/ai:^1.3` dependency, register `Ai\Tools\ListCredentialKeys` and `Ai\Tools\GetCredentialStatus` from an agent's `tools()` method. Construct `Ai\VaultToolContext` with a persisted owner, `Gate::forUser($actor)`, and an explicit allowlist of at most 100 keys. The host must define `viewVaultCredential($owner, $key)`; both the allowlist and the Gate must permit inspection. Every call rechecks access. Never derive actor/owner identity from model-generated tool arguments.
+
+Tools return JSON strings with fixed fields. List pages contain at most 50 keys and use `next_cursor`/`after`. Status includes `stored`, `expired`, `expires_at`, and `rotated_at`. No metadata or ciphertext is selected, and no secret is decrypted or mutated. `stored` does not verify provider validity. There is no automatic tool registration or MCP endpoint. See `docs/agent-tools.md` for the full contract and production setup.

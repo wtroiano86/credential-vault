@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Skillcraft\CredentialVault\Traits;
 
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use SensitiveParameter;
 use Skillcraft\CredentialVault\Contracts\VaultEntryInterface;
 use Skillcraft\CredentialVault\Contracts\VaultServiceInterface;
 use Skillcraft\CredentialVault\Models\VaultEntry;
@@ -46,7 +47,7 @@ trait HasVault
      * @param  string  $value  Plaintext credential value.
      * @param  array<string, mixed>  $metadata  Optional metadata.
      */
-    public function storeCredential(string $key, string $value, array $metadata = []): VaultEntryInterface
+    public function storeCredential(string $key, #[SensitiveParameter] string $value, array $metadata = []): VaultEntryInterface
     {
         return $this->vaultService()->store($this, $key, $value, $metadata);
     }
@@ -78,7 +79,7 @@ trait HasVault
      * @param  string  $key  Credential key name.
      * @param  string  $newValue  New plaintext credential value.
      */
-    public function rotateCredential(string $key, string $newValue): VaultEntryInterface
+    public function rotateCredential(string $key, #[SensitiveParameter] string $newValue): VaultEntryInterface
     {
         return $this->vaultService()->rotate($this, $key, $newValue);
     }

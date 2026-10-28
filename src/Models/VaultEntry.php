@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 use Override;
 use Skillcraft\CredentialVault\Contracts\VaultEntryInterface;
+use Skillcraft\CredentialVault\Exceptions\InvalidVaultOwnerException;
 
 /**
  * Eloquent model representing an encrypted credential entry in the vault.
@@ -108,6 +109,28 @@ class VaultEntry extends Model implements VaultEntryInterface
         $key = $this->getAttribute('key_name');
 
         return is_string($key) ? $key : '';
+    }
+
+    public function getOwnerType(): string
+    {
+        $type = $this->getAttribute('owner_type');
+
+        if (! is_string($type) || $type === '') {
+            throw new InvalidVaultOwnerException('Vault owner type must be a non-empty string.');
+        }
+
+        return $type;
+    }
+
+    public function getOwnerId(): string
+    {
+        $id = $this->getAttribute('owner_id');
+
+        if ((! is_int($id) && ! is_string($id)) || (string) $id === '') {
+            throw new InvalidVaultOwnerException('Vault owner ID must be a non-empty integer or string.');
+        }
+
+        return (string) $id;
     }
 
     /**

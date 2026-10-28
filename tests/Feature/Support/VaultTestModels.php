@@ -30,6 +30,7 @@ final class VaultTestModels
             }
         };
 
+        $model->exists = true;
         $model->morphType = $type;
         $model->morphId = $id;
 

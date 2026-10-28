@@ -6,6 +6,8 @@ namespace Skillcraft\CredentialVault\Facades;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Facade;
+use RuntimeException;
+use SensitiveParameter;
 use Skillcraft\CredentialVault\Contracts\VaultEntryInterface;
 use Skillcraft\CredentialVault\Contracts\VaultServiceInterface;
 
@@ -26,6 +28,18 @@ use Skillcraft\CredentialVault\Contracts\VaultServiceInterface;
  */
 final class Vault extends Facade
 {
+    /** @param array<int|string, mixed> $args */
+    public static function __callStatic($method, #[SensitiveParameter] $args): mixed
+    {
+        $instance = self::getFacadeRoot();
+
+        if ($instance === null) {
+            throw new RuntimeException('A facade root has not been set.');
+        }
+
+        return $instance->$method(...$args);
+    }
+
     /**
      * Get the registered name of the component.
      */
