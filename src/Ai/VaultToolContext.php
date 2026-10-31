@@ -64,7 +64,7 @@ final readonly class VaultToolContext
         // exact owner/key checks before returning anything to the agent.
         $keys = $query->whereIn('key_name', $allowed)->limit(self::MAX_KEYS)
             ->get(['owner_type', 'owner_id', 'key_name'])
-            ->filter(fn (VaultEntry $entry): bool => $this->matchesOwner($entry, $identity)
+            ->filter(fn (VaultEntry $entry): bool => VaultOwnerScope::matchesOwner($entry, $identity)
                 && in_array($entry->getCredentialKey(), $allowed, true))
             ->map(static fn (VaultEntry $entry): string => $entry->getCredentialKey())->all();
         sort($keys, SORT_STRING);
@@ -95,7 +95,7 @@ final readonly class VaultToolContext
         $identity = $query->getModel();
         $entry = $query->where('key_name', $key)->first(['owner_type', 'owner_id', 'key_name', 'expires_at', 'rotated_at']);
 
-        if ($entry !== null && (! $this->matchesOwner($entry, $identity) || $entry->getCredentialKey() !== $key)) {
+        if ($entry !== null && (! VaultOwnerScope::matchesOwner($entry, $identity) || $entry->getCredentialKey() !== $key)) {
             $entry = null;
         }
 
@@ -106,11 +106,6 @@ final readonly class VaultToolContext
             'expires_at' => $entry?->getExpiresAt()?->format(DATE_ATOM),
             'rotated_at' => $entry?->getRotatedAt()?->format(DATE_ATOM),
         ];
-    }
-
-    private function matchesOwner(VaultEntry $entry, VaultEntry $identity): bool
-    {
-        return $entry->getOwnerType() === $identity->getOwnerType() && $entry->getOwnerId() === $identity->getOwnerId();
     }
 
     private function validateKey(string $key): void

@@ -11,6 +11,18 @@ use Skillcraft\CredentialVault\Models\VaultEntry;
 /** @internal */
 final class VaultOwnerScope
 {
+    public static function matchesOwner(VaultEntry $entry, VaultEntry $identity): bool
+    {
+        return $entry->getOwnerType() === $identity->getOwnerType()
+            && $entry->getOwnerId() === $identity->getOwnerId();
+    }
+
+    public static function matchesCredential(VaultEntry $entry, VaultEntry $identity): bool
+    {
+        return self::matchesOwner($entry, $identity)
+            && $entry->getCredentialKey() === $identity->getCredentialKey();
+    }
+
     public static function entry(Model $owner, string $key = ''): VaultEntry
     {
         $ownerId = $owner->getKey();

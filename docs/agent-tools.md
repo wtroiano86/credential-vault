@@ -19,13 +19,19 @@ Follow the SDK's installation/configuration instructions for your application's 
 
 For coding-agent guidance while implementing this integration, the package also ships the `credential-vault-agent-tools` [Laravel Boost skill](../README.md#laravel-boost). Installing that skill does not install the SDK or register these runtime tools.
 
+## Security boundary
+
+These restrictions apply to the two bundled tool handlers. They do not restrict other tools, arbitrary PHP/shell execution, direct calls to `VaultServiceInterface`, or access to database ciphertext and application encryption keys. The core PHP service trusts application callers and does not check the tool context's Gate or allowlist. Keep production secrets and database credentials out of an agent's general execution environment, and expose provider operations through dedicated, authorized server-side tools. Boost skills and model instructions do not enforce runtime permissions.
+
+The application-supplied owner, Gate, entry-model subclass, scopes, accessors, and observers are trusted code. Keep contexts scoped to one actor/owner run and review application Gate overrides; a permissive `before` hook can grant an allowlisted key even without a matching ability definition. The explicit key allowlist still applies.
+
 ## Authorization and registration
 
 The application must construct a `VaultToolContext` with all three arguments:
 
 - `owner`: a persisted Eloquent model on the configured vault entry model's database connection.
 - `gate`: a Laravel Gate instance for the trusted actor, usually `Gate::forUser($user)`.
-- `keys`: an explicit list of credential names this agent may inspect. At most 100 names; each must be valid UTF-8, 1–255 bytes, without control characters. Duplicate names are collapsed. An empty list grants no access.
+- `keys`: an explicit list of credential names this agent may inspect. At most 100 input names, before deduplication; each must be valid UTF-8, 1–255 bytes, without ASCII control bytes (`0x00`–`0x1F`, `0x7F`). Duplicate names are collapsed. An empty list grants no access. These inspection rules are independent of the service's configurable write-name patterns.
 
 For each key, the tools also require the Gate ability `viewVaultCredential` with arguments `[$owner, $key]`. The allowlist does not replace authorization. A missing ability denies access by default. Laravel's normal Gate policies and `before` hooks apply; the host application is responsible for their decisions.
 
@@ -96,7 +102,9 @@ final class IntegrationSetupAgent implements Agent, HasTools
 
 Derive the actor and workspace from trusted application authentication and routing when constructing the agent. Do not accept actor/owner IDs from model-generated tool arguments. The tool input schemas contain neither actor nor owner IDs, and handlers reject unknown arguments.
 
-Authorization runs on every invocation, including subsequent pages and repeated use of a tool instance. Ensure policies read current permissions if permissions can change during a run. Create contexts per agent run; do not bind them as singletons or serialize a context/Gate into a queued agent. Queued jobs should establish any tenant connection context before resolving the tools and re-load the actor/owner, as above.
+Authorization runs on every invocation, including subsequent pages and repeated use of a tool instance. Ensure policies read current permissions if permissions can change during a run. The context retains model/Gate references; rebuild it when the actor, owner, or tenant connection context changes. Create contexts per agent run; do not bind them as singletons or serialize a context/Gate into a queued agent. Queued jobs should establish tenant database context before reloading the actor/owner and constructing the context in `tools()`, as above.
+
+The context constructor validates the key list. Owner persistence/connection validation and Gate evaluation happen when `listKeys()` or `status()` is invoked; constructing a context does not perform an authorization check.
 
 ## Inputs and outputs
 
@@ -109,7 +117,7 @@ Optional arguments:
 | Argument | Type | Behavior |
 |---|---|---|
 | `limit` | integer | 1–50; defaults to 25. Numeric strings, floats, and null are rejected. |
-| `after` | string or null | The preceding response's `next_cursor`; omit or use null for the first page. |
+| `after` | string or null | Use the preceding response's `next_cursor`; omit or use null for the first page. It is a plain name boundary, not a signed token: any valid inspection name is accepted, and it cannot broaden the allowlist or Gate permissions. |
 
 Example result:
 
@@ -121,7 +129,7 @@ Only stored, non-deleted keys that pass both the allowlist and Gate are returned
 
 ### GetCredentialStatus
 
-Required argument: `key` (string). The key must appear in the application allowlist and pass its Gate check.
+Required argument: `key` (string). The key must satisfy the inspection-name rules above, appear in the application allowlist, and pass its Gate check.
 
 Stored entry:
 
@@ -149,7 +157,7 @@ Discovery filters denied keys and returns an empty page when none are allowed. A
 
 ## Production behavior
 
-The tools query the configured `VaultEntry` model/subclass directly, respecting its global scopes and soft deletes while disabling default relationship eager loading. They share the service's persisted-owner and connection checks, and additionally compare returned owner/key identities exactly so permissive database collations cannot broaden access. Custom models should retain the package's unique owner/key constraint and attribute meanings. A custom `VaultServiceInterface` backed by a different storage system needs its own tools; these tools do not call that service's `listKeys()` or `retrieve()`.
+The tools query the configured `VaultEntry` model/subclass directly, respecting its global scopes and soft deletes while disabling default relationship eager loading. They share the service's persisted-owner, connection, and exact owner identity checks, and enforce exact allowed key names so permissive database collations cannot broaden access. Custom models should retain the package's unique owner/key constraint and attribute meanings. A custom `VaultServiceInterface` backed by a different storage system needs its own tools; these tools do not call that service's `listKeys()` or `retrieve()`.
 
 No vault lifecycle or `CredentialAccessed` events are emitted, because no secrets are read and no entries are mutated. For agent audit records, use the SDK's `ToolInvoked` events and correlate the invocation with the trusted actor/owner in application code. An error JSON response is a completed SDK invocation, not a thrown `ToolFailed` event. These tools do not provide a durable audit store, rate limiter, or an agent execution budget; apply those controls in the application. SDK instrumentation may capture model-supplied arguments, so apply your own logging/redaction policy there. Log selected event fields rather than serializing entire event/tool objects, which contain the application-supplied context.
 

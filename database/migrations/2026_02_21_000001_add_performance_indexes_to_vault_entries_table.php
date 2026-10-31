@@ -9,10 +9,8 @@ use Illuminate\Support\Facades\Schema;
 /**
  * Add performance indexes to vault_entries table.
  *
- * Performance improvements:
- * - owner_index: 10-1000x faster polymorphic owner queries
- * - deleted_at_index: Automatic optimization for soft delete filtering
- * - expires_at_index: 100-500x faster for TTL/cleanup jobs
+ * Supports owner lookups and deletion/expiry filters. Actual performance depends
+ * on the database, query plan, and data distribution. No cleanup job is bundled.
  */
 return new class extends Migration
 {

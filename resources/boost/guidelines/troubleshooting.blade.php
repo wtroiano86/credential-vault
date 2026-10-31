@@ -27,7 +27,7 @@ $workspace->storeCredential('key', $value);            // three letters is valid
 
 **Symptom:** `CredentialNotFoundException` is thrown when calling `rotateCredential()` or `Vault::rotate()`.
 
-**Cause:** There is no non-deleted vault entry for that owner and key. **`retrieve()` / `retrieveCredential()` do not throw this** — they return `null` when missing or when expired with `expired.return_null` enabled.
+**Cause:** There is no exact, non-deleted vault entry for that owner and key. A database collation match with different case or trailing spaces is treated as missing. **`retrieve()` / `retrieveCredential()` do not throw this** — they return `null` when missing or when expired with `expired.return_null` enabled.
 
 @verbatim
 <code-snippet name="Guard rotate vs handle null on retrieve" lang="php">
@@ -38,7 +38,8 @@ if ($value === null) {
     throw new \RuntimeException('OpenAI API key not configured for this workspace.');
 }
 
-// rotate: throws CredentialNotFoundException if the key was never stored
+// Existence is only a point-in-time check. Rotation can still throw if another
+// process deletes the entry before the write; handle that at the application boundary.
 if ($workspace->hasCredential('openai_api_key')) {
     $workspace->rotateCredential('openai_api_key', $newKey);
 }
@@ -51,11 +52,11 @@ if ($workspace->hasCredential('openai_api_key')) {
 
 **Symptom:** Retrieving a credential throws `CryptoOperationException`.
 
-**Possible causes:** The payload is damaged, the encryption mode or cipher changed, the original application key is unavailable, the owner/name/database context changed, or the row still uses the legacy format (disabled by default). Per-owner mode derives from the current `app.key` only; it does not try previous keys. Default mode uses Laravel's injected encrypter, including configured previous keys.
+**Possible causes:** The payload is damaged, the encryption mode or cipher changed, the original application key is unavailable, the owner/name/database/table/prefix context changed, or the row still uses `scv2:` or an older legacy format (disabled by default). Per-owner mode derives from the current `app.key` only; it does not try previous keys. Default mode uses Laravel's injected encrypter, including configured previous keys.
 
 @verbatim
-<code-snippet name="Recover from key rotation issues" lang="bash">
-# Upgrade legacy ciphertext under the original key, cipher, and mode:
+<code-snippet name="Upgrade older payload formats under their original settings" lang="bash">
+# Upgrade scv2 and older ciphertext under the original key, cipher, mode, and tenant prefix:
 php artisan credential-vault:upgrade-encryption --dry-run
 php artisan credential-vault:upgrade-encryption
 # This command does not change encryption keys or modes.
@@ -83,19 +84,20 @@ php artisan credential-vault:upgrade-encryption
 
 **Symptom:** A previously stored credential returns `null` on retrieve.
 
-**Cause:** No row exists, the row was soft-deleted, the wrong owner was passed, or the **`expires_at` column** on `scp_vault_entries` has reached the current time. When `expired.return_null = true` (default), expired rows return `null` without decrypting. Putting an expiry inside `metadata` does not set this column. `hasCredential()` can return true for an expired entry.
+**Cause:** No exact row is visible to the configured model's scopes, the row was soft-deleted, the wrong owner/key was passed, or the **`expires_at` column** on the configured vault table has reached the current time. When `expired.return_null = true` (default), expired rows return `null` without decrypting. Putting an expiry inside `metadata` does not set this column. `hasCredential()` can return true for an expired entry.
 
 @verbatim
-<code-snippet name="Check expiry state on a VaultEntry" lang="php">
-$entry = $workspace->vaultEntries()
-    ->where('key_name', 'temp_access_token')
-    ->first();
+<code-snippet name="Replace an expired credential and renew expiry" lang="php">
+use Skillcraft\CredentialVault\Models\VaultEntry;
 
-if ($entry?->isExpired()) {
-    // Rotation preserves the old expiry, so renew it explicitly
-    $workspace->rotateCredential('temp_access_token', $newToken);
-    $entry->update(['expires_at' => now()->addHour()]);
+// The owner is loaded and authorized; the caller obtained a new provider token.
+// Rotation supports expired entries but throws if missing or deleted.
+$entry = $workspace->rotateCredential('temp_access_token', $newToken);
+if (! $entry instanceof VaultEntry) {
+    throw new \LogicException('This expiry example requires the Eloquent vault implementation.');
 }
+$entry->update(['expires_at' => now()->addHour()]);
+// These are separate writes. Use an outer vault-connection transaction if needed.
 </code-snippet>
 @endverbatim
 
@@ -153,9 +155,9 @@ php artisan migrate
 
 `InvalidVaultOwnerException` means the owner is unsaved, has an invalid primary key, or uses a different database connection from the configured vault entry model. Persist the owner and use a vault model on that connection. Sharing a central vault across owner connections requires a custom service with an explicit identity scheme.
 
-`CredentialPersistenceException` means a model observer vetoed a save, restoration, rotation, or deletion. The transaction rolls back and no mutation event is dispatched. Inspect the observer; do not treat a veto as a successful write.
+`CredentialPersistenceException` means a model observer vetoed a save, restoration, rotation, or deletion, or a store matched a different owner/key under the database collation. The transaction rolls back and no mutation event is dispatched. Inspect the exception message and relevant observers or identity-column/index comparisons; do not treat a rejected write as successful. Binary comparison semantics are needed when distinct case or trailing-space identities must coexist.
 
-`store()` automatically restores a soft-deleted owner/key row with the new value and metadata, clearing its old expiry and rotation time. Active entries retain those timestamps.
+`store()` automatically restores an exact soft-deleted owner/key row with the new value and metadata, clearing its old expiry and rotation time. Non-deleted entries retain those timestamps, even when expired.
 
 @verbatim
 <code-snippet name="Store a replacement for a deleted credential" lang="php">
@@ -198,9 +200,11 @@ $apiKey = $workspace->retrieveCredential('openai_api_key');
 
 ### Issue: Agent credential tools return errors or no keys
 
-- `not_authorized`: status requested a key outside the application allowlist or denied by `viewVaultCredential`. Use a Gate instance for the trusted actor and define the ability/policy with owner and key arguments. Discovery silently filters denied keys.
+- `not_authorized`: status requested a key outside the application allowlist or denied by `viewVaultCredential`. Use a Gate instance for the trusted actor and define the ability/policy with owner and key arguments. Normal Gate hooks apply. Discovery silently filters denied keys. Do not broaden the allowlist or replace the tool with direct service calls to work around a denial.
 - `invalid_arguments`: check the tool schema. List limits are integers from 1 to 50; status requires a string `key`. Unknown fields, including owner IDs and requests for values, are rejected.
 - `unavailable`: inspect owner persistence, the configured entry model/connection, and policy/query failures in trusted application code. Raw exception details are deliberately excluded from model responses.
 - `Laravel\Ai\Contracts\Tool` missing: install the optional `laravel/ai:^1.3` dependency before registering tools.
 
 A stored credential may be expired, corrupt, or revoked by its provider. These tools report storage state without decryption or a provider request. They emit no vault access event; inspect SDK `ToolInvoked` results, including error JSON, for agent telemetry. See `docs/agent-tools.md` for setup and diagnosis.
+
+If an agent accesses secrets through a separate shell/PHP tool or direct service call, it is operating outside these handlers. The package does not sandbox application-code execution or prevent decryption by a principal with both ciphertext and encryption keys. Restrict the agent's other capabilities and keep production credentials out of its general execution environment.

@@ -2,7 +2,9 @@
 
 Encrypted per-tenant credential storage for Laravel. Stores third-party API keys and secrets encrypted at rest, scoped to any polymorphic owner (Workspace, Team, User), with built-in rotation, expiry, and audit event dispatch.
 
-Requires PHP 8.4+ (8.x) and Laravel / Illuminate 13.x. The default table is `scp_vault_entries`; per-owner encryption key derivation is optional and disabled by default.
+Requires PHP 8.4+ (8.x) and Laravel / Illuminate 13.x. The default table is `scp_vault_entries`; key derivation per credential context is optional and disabled by default.
+
+The core service/facade/trait trust application callers to authorize the actor for the owner/key. The bundled AI tools enforce their own allowlist and Gate checks; these controls do not restrict direct service calls, arbitrary application PHP, or access to ciphertext and application encryption keys. Boost guidance is not a runtime access control. Use trusted, loaded owner models; validation checks Eloquent's `exists` flag and ID/connection without re-querying the owner table.
 
 ### Skills
 
@@ -66,7 +68,7 @@ return [
 
 #### HasVault Trait — Credential Access on Owner Models
 
-Apply `HasVault` to any Eloquent model that owns credentials. Credential operations delegate to `VaultServiceInterface`; `vaultEntries()` returns a relationship to the base `VaultEntry` model. Use a persisted owner with a non-empty integer or string primary key on the same database connection as the configured vault entry model. All operations reject invalid owners with `InvalidVaultOwnerException`.
+Apply `HasVault` to an Eloquent model that owns credentials. The six credential operations delegate to `VaultServiceInterface`; `vaultEntries()` returns a direct relationship to the base `VaultEntry` model. For service calls, use a persisted owner with a non-empty integer or string primary key on the same database connection as the configured vault entry model. Service operations reject invalid owners with `InvalidVaultOwnerException`; the relationship does not apply those checks.
 
 @verbatim
 <code-snippet name="Apply HasVault to an owner model" lang="php">
@@ -129,7 +131,7 @@ Vault::delete($workspace, 'github_token');
 
 #### Credential Rotation
 
-Rotation replaces the encrypted value, timestamps `rotated_at`, and dispatches `CredentialRotated`. It preserves metadata and `expires_at`, and throws `CredentialNotFoundException` when no non-deleted entry exists. Updating an active entry with `store()` replaces its metadata but does not stamp `rotated_at` or change expiry. Storing a deleted entry restores it and clears both timestamps.
+Rotation replaces the encrypted value supplied by the caller, timestamps `rotated_at`, and dispatches `CredentialRotated`. It preserves metadata and `expires_at`, and throws `CredentialNotFoundException` when no exact, non-deleted entry exists. Updating a non-deleted entry with `store()` replaces its metadata but does not stamp `rotated_at` or change expiry, even if already expired. Storing a deleted entry restores it and clears both timestamps. Rotation does not provision or revoke provider credentials or rotate encryption keys. Soft deletion retains ciphertext; expiry does not purge it.
 
 @verbatim
 <code-snippet name="Rotate a credential to a new value" lang="php">
@@ -164,17 +166,23 @@ foreach ($keys as $entry) {
 
 #### Vault Entry Relationship
 
-Access raw `VaultEntry` Eloquent records directly via the morphMany relationship.
+The morphMany relationship exposes raw `VaultEntry` records for trusted application code. It uses database comparison rules and bypasses service validation, exact identity checks, encryption, expiry filtering, and credential events. Check identity before using results; prefer service methods for credential operations.
 
 @verbatim
 <code-snippet name="Query vault entries as Eloquent records" lang="php">
-// All entries for this owner (non-deleted)
-$entries = $workspace->vaultEntries()->get();
-
-// Find by key name
+// $workspace is loaded and authorized. Find a candidate using database comparisons.
+$key = 'openai_api_key';
 $entry = $workspace->vaultEntries()
-    ->where('key_name', 'openai_api_key')
+    ->where('key_name', $key)
     ->first();
+
+if ($entry !== null && (
+    $entry->getOwnerType() !== $workspace->getMorphClass()
+    || $entry->getOwnerId() !== (string) $workspace->getKey()
+    || $entry->getCredentialKey() !== $key
+)) {
+    $entry = null;
+}
 
 echo $entry?->getCredentialKey(); // 'openai_api_key' (getKey() returns the ULID)
 $expired = $entry?->isExpired();  // bool when found, null when absent
@@ -203,7 +211,7 @@ $workspace->storeCredential('1key', $value);        // starts with a digit
 
 ### Events
 
-All events carry `ownerType`, `ownerId`, and `key` — never the raw credential value. Mutation events dispatch after the outermost transaction commits and are discarded on rollback. Model vetoes raise `CredentialPersistenceException`. Deleting a missing row emits no event. Access events follow successful decryption immediately.
+All events carry `ownerType`, `ownerId`, and `key` — never the raw credential value or acting user identity. Correlate the actor in application audit code. Mutation events dispatch after the outermost transaction commits and are discarded on rollback. Model vetoes raise `CredentialPersistenceException`. Deleting a missing row emits no event. Access events follow successful decryption immediately. Synchronous listeners can throw after dispatch begins; mutation listener failures happen after the write commits. Events are not a durable audit store.
 
 `CredentialAccessed` fires only after successful decryption when `audit.enabled` is true. `CredentialStored`, `CredentialRotated`, and `CredentialDeleted` are independent of that setting. Deleting a missing entry does not dispatch `CredentialDeleted`.
 
@@ -232,21 +240,23 @@ Event::listen(CredentialRotated::class, function (CredentialRotated $event) {
 
 - **Do:** Handle `null` from `retrieveCredential()` directly. `hasCredential()` checks existence, including expired entries, so it does not guarantee a value can be retrieved.
 - **Do:** Store non-sensitive metadata (provider name, label, scopes); it is stored as unencrypted JSON and returned in listings and DTOs.
-- **Do:** Use `rotateCredential()` / `Vault::rotate()` to replace an active credential and record the latest rotation time. `store()` restores soft-deleted rows with the replacement value and clears their expiry and rotation time.
-- **Do:** Set or renew `expires_at` explicitly when needed. Neither method reads expiry from metadata. Active updates preserve expiry; storing a deleted entry clears it.
+- **Do:** Use `rotateCredential()` / `Vault::rotate()` to replace a non-deleted credential and record the latest rotation time. `store()` restores soft-deleted rows with the replacement value and clears their expiry and rotation time.
+- **Do:** Set or renew `expires_at` explicitly when needed, preferably on the model returned by storage/rotation. Neither method reads expiry from metadata. Non-deleted rows preserve expiry; storing a deleted entry clears it.
 - **Do:** Use snake_case key names that describe the provider + purpose (e.g., `openai_api_key`, `stripe_webhook_secret`).
-- **Don't:** Store decrypted values in logs, session, cache, or DTO `jsonSerialize()` output — the package never does this.
+- **Don't:** Put decrypted values in logs, session, cache, or DTO metadata; metadata is not scrubbed for secrets.
 - **Don't:** Read `encrypted_value` directly from the model — always go through `Vault::retrieve()` or `retrieveCredential()`.
 - **Don't:** Write credential values directly through `VaultEntry`; use the service or trait for encryption and events. Direct model updates are needed to set expiry.
 
 ### Security Upgrade
 
-New writes authenticate the owner type/ID, credential name, and connection/database/table context. Legacy reads are disabled by default. Before deploying to an existing database, pause credential traffic, back up data and keys, keep the original key/cipher/mode, and run `php artisan credential-vault:upgrade-encryption --dry-run` followed by `php artisan credential-vault:upgrade-encryption`. The command includes expired/deleted rows and is resumable; resolve all failures before resuming traffic. Keep `encryption.allow_legacy = false`; temporary compatibility reads retain the legacy substitution risk. Update published regex defaults to use `\A` and `\z`. See `docs/credential-vault.md` for the full upgrade procedure.
+New `scv3:` writes authenticate the owner type/ID, credential name, and connection/database/table/prefix context. Reads of `scv2:` and older legacy formats are disabled by default. Installations with older ciphertext must upgrade, even without table prefixes; new empty installations need no ciphertext upgrade. Pause credential traffic, back up data and keys, keep the original key/cipher/mode and tenant prefixes, and run `php artisan credential-vault:upgrade-encryption --dry-run` followed by `php artisan credential-vault:upgrade-encryption` for every tenant scope/database/prefix. The command includes expired/deleted rows and is resumable; resolve all failures before resuming traffic. Keep `encryption.allow_legacy = false`; temporary compatibility reads retain the older formats' substitution risks. Update published regex defaults to use `\A` and `\z`. See `docs/credential-vault.md` for the full upgrade procedure.
+
+Service operations require exact owner type/ID and key matches, independently of database collation. A colliding store/restoration throws `CredentialPersistenceException`; other lookups treat mismatched identities as missing. Configure binary identity-column/index comparisons when distinct case or trailing-space identities must coexist. Direct Eloquent relationships do not gain these service checks.
 
 Authorize owner access in the application. Keep secrets out of metadata, key names, and logs. Use `zend.exception_ignore_args = On` in production; package secret parameters are redacted, but custom callers/drivers also need protection. Context authentication does not prevent replay of old ciphertext for the same credential.
 
 ### Production Laravel AI Agents
 
-With the optional `laravel/ai:^1.3` dependency, register `Ai\Tools\ListCredentialKeys` and `Ai\Tools\GetCredentialStatus` from an agent's `tools()` method. Construct `Ai\VaultToolContext` with a persisted owner, `Gate::forUser($actor)`, and an explicit allowlist of at most 100 keys. The host must define `viewVaultCredential($owner, $key)`; both the allowlist and the Gate must permit inspection. Every call rechecks access. Never derive actor/owner identity from model-generated tool arguments.
+With the optional `laravel/ai:^1.3` dependency, register `Ai\Tools\ListCredentialKeys` and `Ai\Tools\GetCredentialStatus` from an agent's `tools()` method. Construct `Ai\VaultToolContext` with a persisted owner, `Gate::forUser($actor)`, and an explicit allowlist of at most 100 input names. Configure `viewVaultCredential` with `[$owner, $key]` arguments; both the allowlist and the Gate must permit inspection. Normal Gate policies and `before` hooks apply. Every call rechecks access. Never derive actor/owner identity from model-generated tool arguments.
 
 Tools return JSON strings with fixed fields. List pages contain at most 50 keys and use `next_cursor`/`after`. Status includes `stored`, `expired`, `expires_at`, and `rotated_at`. No metadata or ciphertext is selected, and no secret is decrypted or mutated. `stored` does not verify provider validity. There is no automatic tool registration or MCP endpoint. See `docs/agent-tools.md` for the full contract and production setup.

@@ -17,9 +17,13 @@ use Skillcraft\CredentialVault\Support\VaultConfig;
  */
 final readonly class CredentialCiphertext
 {
-    private const string PREFIX = 'scv2:';
+    private const string PREFIX = 'scv3:';
 
-    private const string MAGIC = "skillcraft-credential-vault:v2\n";
+    private const string MAGIC = "skillcraft-credential-vault:v3\n";
+
+    private const string PREVIOUS_PREFIX = 'scv2:';
+
+    private const string PREVIOUS_MAGIC = "skillcraft-credential-vault:v2\n";
 
     public function __construct(private VaultEncryptionInterface $encryption) {}
 
@@ -46,15 +50,7 @@ final readonly class CredentialCiphertext
             return $this->decryptLegacy($encrypted, $entry);
         }
 
-        $context = $this->context($entry);
-        $value = $this->encryption->decrypt(substr($encrypted, strlen(self::PREFIX)), $this->tenantKey($context));
-        $header = self::MAGIC.$context;
-
-        if (! hash_equals($header, substr($value, 0, strlen($header)))) {
-            throw new CryptoOperationException('Credential ciphertext context does not match.');
-        }
-
-        return substr($value, strlen($header));
+        return $this->decryptBound($encrypted, self::PREFIX, self::MAGIC, $this->context($entry));
     }
 
     /** Return a replacement for legacy ciphertext; verify already upgraded rows. */
@@ -73,14 +69,30 @@ final readonly class CredentialCiphertext
 
     private function decryptLegacy(string $encrypted, VaultEntry $entry): string
     {
+        if (str_starts_with($encrypted, self::PREVIOUS_PREFIX)) {
+            return $this->decryptBound($encrypted, self::PREVIOUS_PREFIX, self::PREVIOUS_MAGIC, $this->context($entry, bindTablePrefix: false));
+        }
+
         $value = $this->encryption->decrypt($encrypted, $this->tenantKey($entry->getOwnerId()));
 
         // Do not let removing the public version marker bypass context verification.
-        if (str_starts_with($value, self::MAGIC)) {
+        if (str_starts_with($value, self::MAGIC) || str_starts_with($value, self::PREVIOUS_MAGIC)) {
             throw new CryptoOperationException('Credential ciphertext version marker is missing.');
         }
 
         return $value;
+    }
+
+    private function decryptBound(string $encrypted, string $prefix, string $magic, string $context): string
+    {
+        $value = $this->encryption->decrypt(substr($encrypted, strlen($prefix)), $this->tenantKey($context));
+        $header = $magic.$context;
+
+        if (! hash_equals($header, substr($value, 0, strlen($header)))) {
+            throw new CryptoOperationException('Credential ciphertext context does not match.');
+        }
+
+        return substr($value, strlen($header));
     }
 
     private function encryptedValue(VaultEntry $entry): string
@@ -94,16 +106,22 @@ final readonly class CredentialCiphertext
         return $encrypted;
     }
 
-    private function context(VaultEntry $entry): string
+    private function context(VaultEntry $entry, bool $bindTablePrefix = true): string
     {
-        return hash('sha256', json_encode([
+        $context = [
             $entry->getConnection()->getName(),
             $entry->getConnection()->getDatabaseName(),
             $entry->getTable(),
             $entry->getAttribute('owner_type'),
             $entry->getOwnerId(),
             $entry->getAttribute('key_name'),
-        ], JSON_THROW_ON_ERROR));
+        ];
+
+        if ($bindTablePrefix) {
+            $context[] = $entry->getConnection()->getTablePrefix();
+        }
+
+        return hash('sha256', json_encode($context, JSON_THROW_ON_ERROR));
     }
 
     private function tenantKey(string $context): ?string

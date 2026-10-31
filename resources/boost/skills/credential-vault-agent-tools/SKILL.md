@@ -1,11 +1,13 @@
 ---
 name: credential-vault-agent-tools
-description: Integrate or troubleshoot skillcraft/credential-vault ListCredentialKeys and GetCredentialStatus tools in Laravel AI SDK agents, including Gate authorization, bounded key discovery, queued context reconstruction, and JSON error handling.
+description: Integrate or troubleshoot the credential-vault inspection tools in Laravel AI SDK agents. Use for Gate authorization, key allowlists, pagination, queued contexts, and tool errors; use credential-vault-development for ordinary credential storage.
 ---
 
 # Credential Vault agent tools
 
 These runtime tools inspect stored credential names and status without selecting ciphertext/metadata, decrypting values, or writing entries. For ordinary application storage use `credential-vault-development`.
+
+This skill is development guidance. Runtime restrictions come from the bundled handlers, their allowlist, and their Gate checks. They do not restrict direct vault-service calls, arbitrary PHP/shell execution, or access to ciphertext and application encryption keys. Keep an agent's other tools and execution permissions within its intended access.
 
 Read `vendor/skillcraft/credential-vault/docs/agent-tools.md` for the full agent class and output contracts; in the package repository, use `docs/agent-tools.md`. Inspect existing policies and agent conventions before integrating.
 
@@ -50,11 +52,11 @@ $context = new VaultToolContext(
 return [new ListCredentialKeys($context), new GetCredentialStatus($context)];
 ```
 
-The owner must be persisted on the configured vault entry model's connection. `keys` must be a list of at most 100 names, each valid UTF-8, 1–255 bytes, without control characters. Duplicate names are collapsed; an empty list grants no access. These inspection-name rules are independent of the service's configurable write-name pattern.
+The owner must be persisted on the configured vault entry model's connection. `keys` must be a list of at most 100 input names before deduplication, each valid UTF-8, 1–255 bytes, without ASCII control bytes (`0x00`–`0x1F`, `0x7F`). Duplicate names are collapsed; an empty list grants no access. These inspection-name rules are independent of the service's configurable write-name pattern. Construction validates the key list; owner/connection validation and authorization happen on invocation.
 
 Never obtain actor/owner IDs or broaden the allowlist from model-generated arguments. Gate checks run for every invocation; missing abilities deny access by default, subject to normal application Gate hooks. Policies must read current permissions when revocation can happen during a run.
 
-For queued agents, serialize trusted actor/owner identifiers, reload the models, establish tenant database context, and reconstruct the context inside `tools()`. Do not serialize Gate/context objects or register contexts as singletons.
+For queued agents, serialize trusted actor/owner identifiers, establish tenant database context before reloading models, and reconstruct the context inside `tools()`. Do not serialize Gate/context objects or register contexts as singletons. The context retains model/Gate references; rebuild it when the actor, owner, or tenant connection context changes.
 
 ## Handle the tool contract
 
@@ -63,7 +65,7 @@ For queued agents, serialize trusted actor/owner identifiers, reload the models,
 | `vault_list_credential_keys` | Optional integer `limit` (1–50, default 25); optional string/null `after` | `keys`, `next_cursor`, `has_more` |
 | `vault_get_credential_status` | Required string `key` | `key`, `stored`, `expired`, `expires_at`, `rotated_at` |
 
-List results include authorized non-deleted keys, including expired entries, sorted by bytewise name comparison. Pass `next_cursor` as `after` for the next page. Permission changes and concurrent writes can change later pages.
+List results include authorized non-deleted keys, including expired entries, sorted by bytewise name comparison. Pass `next_cursor` as `after` for the next page. The cursor is a plain name boundary, not a signed token; it cannot broaden access. Permission changes and concurrent writes can change later pages.
 
 Missing/deleted authorized entries report `stored: false` with null expiry/rotation fields. Status expiry is independent of `expired.return_null`. `stored: true` does not establish that ciphertext decrypts, a provider accepts the secret, or the credential has sufficient scopes.
 
@@ -78,6 +80,7 @@ Context construction errors propagate to application code. Tool handlers convert
 ## Preserve the inspection boundary
 
 - Tools query the configured `VaultEntry` subclass directly with its global scopes, excluding default relationship eager loading. They do not use custom `VaultServiceInterface` storage backends; such backends need their own inspection tools.
+- Tools compare returned owner IDs/types and allowed names exactly, independently of database collation. Custom scopes, accessors, and observers are trusted application code and must preserve that boundary.
 - Do not substitute `Vault::listKeys()` for the discovery tool: it includes caller-supplied metadata and is unbounded. Do not expose `retrieve()`, encrypted model attributes, or whole models in agent responses.
 - These tools emit no vault lifecycle or access events. Inspect SDK `ToolInvoked` results for telemetry: error JSON is a completed invocation, not a thrown `ToolFailed`. Log selected fields, not entire tool/context objects.
 - If the agent needs a provider operation, implement an application tool that authorizes the operation, selects the destination/credential on the server, retrieves the secret internally, and returns only the business result. Direct secret entry to the application's settings flow.

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-31
+
+### Breaking changes
+
+- Default reads now require `scv3:` ciphertext. Before resuming traffic after upgrading from 1.x, migrate existing `scv2:` and older payloads with `credential-vault:upgrade-encryption` under their original keys, encryption settings, and tenant contexts. New installations need no ciphertext migration. See the [upgrade procedure](docs/credential-vault.md#security-and-upgrading-existing-installations).
+
+### Security
+
+- Require exact owner type, owner ID, and credential name matches before service reads or mutations, preventing cross-owner access through permissive database collations. Storage conflicts fail without changing or restoring the colliding row.
+- Bind new `scv3:` ciphertext to the connection table prefix in both encryption modes. The upgrade command migrates `scv2:` and older payloads while preserving lifecycle fields; compatibility reads remain disabled by default. Existing installations must follow the updated upgrade procedure before resuming traffic.
+
+### Added
+
+- Regression tests for case-insensitive and trailing-space-insensitive identity collisions, cross-prefix ciphertext substitution, format downgrades, and resumable upgrades of active, expired, and soft-deleted `scv2:` entries.
+
+### Changed
+
+- Align the reference documentation and Laravel Boost guidelines/skills with implemented authorization boundaries, exact identity checks, credential lifecycle behavior, audit events, and AI tool validation. Update expiry/reporting examples and distinguish new installations from ciphertext upgrades.
+
 ## [1.1.0] - 2026-10-28
 
 ### Added

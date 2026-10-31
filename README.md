@@ -1,10 +1,14 @@
 # skillcraft/credential-vault
 
-Encrypted credential storage for Laravel applications. Credentials are stored in `scp_vault_entries` by default, encrypted at rest, and scoped to a polymorphic owner (workspace, team, user, etc.), with rotation metadata, optional per-owner key derivation, and access auditing via events.
+Encrypted credential storage for Laravel applications. Credentials are stored in `scp_vault_entries` by default, encrypted at rest, and scoped to a polymorphic owner (workspace, team, user, etc.), with rotation metadata, optional key derivation per credential context, and access auditing via events.
 
 **Requirements:** PHP 8.4+ (8.x) and Laravel / Illuminate 13.x.
 
 Further detail: [docs/credential-vault.md](docs/credential-vault.md).
+
+## Security boundary
+
+The core PHP service, facade, and trait trust application callers to authorize access to the supplied owner. The optional AI tools enforce an explicit key allowlist and Laravel Gate checks, and return only credential names/status. These tool restrictions apply to calls through those tools; they do not restrict an agent that can execute arbitrary PHP or access both vault ciphertext and application encryption keys. Boost skills provide coding guidance, not runtime access controls. See the [security model](docs/credential-vault.md#security-boundary) and [agent integration boundary](docs/agent-tools.md#security-boundary).
 
 ## Install
 
@@ -44,14 +48,14 @@ The existing `credential-vault-migrations` publish tag is also supported.
 
 ## Upgrading existing installations
 
-This security update changes the ciphertext format and rejects legacy reads by default. Pause credential traffic, preserve the original keys and encryption settings, then validate and migrate:
+Version 2.0 writes `scv3:` ciphertext, which also authenticates the connection's table prefix. When upgrading from 1.x, all existing `scv2:` and older ciphertext must be upgraded, including installations without table prefixes; normal reads reject those formats by default. Pause credential traffic, preserve the original keys, encryption settings, and tenant table prefixes, then validate and migrate:
 
 ```bash
 php artisan credential-vault:upgrade-encryption --dry-run
 php artisan credential-vault:upgrade-encryption
 ```
 
-Read the [upgrade procedure and compatibility changes](docs/credential-vault.md#security-and-upgrading-existing-installations) before deployment. The command includes deleted and expired entries and can be safely rerun. New installations need no ciphertext migration.
+Read the [upgrade procedure and compatibility changes](docs/credential-vault.md#security-and-upgrading-existing-installations) before deployment. Run the command for every tenant database/prefix and scope. It includes deleted and expired entries and can be safely rerun. New installations need no ciphertext migration.
 
 ## Usage
 
@@ -89,11 +93,15 @@ use Skillcraft\CredentialVault\Models\VaultOwner;
 class Workspace extends VaultOwner {}
 ```
 
-All operations require a persisted owner with a non-empty integer or string primary key on the same database connection as the configured vault entry model. Invalid owners raise `InvalidVaultOwnerException`. By default, credential names must be 3–100 characters, start with a lowercase letter, end with a lowercase letter or digit, and contain only lowercase letters, digits, and underscores. `store()` and `rotate()` validate these names.
+All six service operations require a persisted owner with a non-empty integer or string primary key on the same database connection as the configured vault entry model. Invalid owners raise `InvalidVaultOwnerException`. The `vaultEntries()` relationship is a direct Eloquent API and does not apply these service checks. By default, credential names must be 3–100 characters, start with a lowercase letter, end with a lowercase letter or digit, and contain only lowercase letters, digits, and underscores. `store()` and `rotate()` validate these names.
 
 Authorize the actor's access to the owner in your application before calling the vault. Owner scoping does not perform authorization. Keep secret values out of key names, metadata, logs, and API responses; metadata is unencrypted and included in key listings.
 
-Expiry must be set on the entry's `expires_at` column. Updating an active entry with `store()` or `rotate()` preserves expiry. Storing a deleted key restores its existing row with new ciphertext and metadata and clears its old expiry and rotation time. See [service behavior](docs/credential-vault.md#services) for details.
+Owner types, IDs, and credential names must match exactly, even when the database uses case-insensitive or trailing-space-insensitive comparisons. A conflicting `store()` throws `CredentialPersistenceException`, including when the conflicting row is soft-deleted. Use binary comparison semantics for the vault identity columns and their unique index if such distinct identities must coexist. See the [service behavior](docs/credential-vault.md#services) for other collision outcomes.
+
+Expiry must be set on the entry's `expires_at` column. Updating a non-deleted entry with `store()` or `rotate()` preserves expiry, even if it has already expired. Storing a deleted key restores its existing row with new ciphertext and metadata and clears its old expiry and rotation time. See [service behavior](docs/credential-vault.md#services) for details.
+
+Rotation stores a replacement secret supplied by the caller; it does not generate or revoke credentials at a provider. Deletion is a soft delete and retains ciphertext. Provider validation, revocation, permanent purging, and durable audit logging are application responsibilities.
 
 ### `Vault` facade
 
@@ -125,7 +133,7 @@ See the [agent tool setup and production guide](docs/agent-tools.md) for authori
 
 ## Laravel Boost
 
-The package ships guidelines in `resources/boost/guidelines/` and three skills in `resources/boost/skills/`:
+The package ships [core](resources/boost/guidelines/core.blade.php), [advanced](resources/boost/guidelines/advanced.blade.php), and [troubleshooting](resources/boost/guidelines/troubleshooting.blade.php) guidelines in `resources/boost/guidelines/`, and three skills in `resources/boost/skills/`:
 
 | Skill | Use it for |
 |---|---|
@@ -153,6 +161,7 @@ composer install
 composer test:compact
 composer lint:check
 composer analyse
+composer audit --locked
 ```
 
-`composer test:unit` and `composer test:integration` run the suites separately. `composer test:coverage` requires a supported coverage driver; with Xdebug, use `XDEBUG_MODE=coverage composer test:coverage`. Keep the README, reference docs, Boost guidelines, and skills aligned when public behavior changes.
+`composer test:unit` and `composer test:integration` run the suites separately. `composer test:coverage` requires a supported coverage driver; with Xdebug, use `XDEBUG_MODE=coverage composer test:coverage`. `XDEBUG_MODE=coverage composer check` runs formatting checks, static analysis, and the coverage suite. Integration tests use SQLite and fake AI provider responses; they do not validate a deployment's database configuration or live provider credentials. Keep the README, reference docs, Boost guidelines, and skills aligned when public behavior changes.

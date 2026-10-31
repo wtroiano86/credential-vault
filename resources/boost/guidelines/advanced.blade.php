@@ -2,7 +2,7 @@
 
 ### Dependency Injection via VaultServiceInterface
 
-Prefer injecting `VaultServiceInterface` directly in services or jobs for testability and to avoid facade coupling.
+Prefer injecting `VaultServiceInterface` directly in services or jobs for testability and to avoid facade coupling. The caller must authorize the actor's access to the owner/key before invoking these methods; this example assumes that has happened and is not an AI tool registration.
 
 @verbatim
 <code-snippet name="Inject VaultServiceInterface in a service class" lang="php">
@@ -32,7 +32,7 @@ class OpenAiClient
 
 ### Per-Tenant Encryption Keys
 
-Enable per-tenant key derivation to derive encryption keys with HKDF-SHA-256 from the current `app.key`, using a digest of the owner type/ID, credential name, and vault connection/database/table as salt. The service authenticates this context in both encryption modes, so copied ciphertext is rejected. Every operation requires a persisted owner with an integer or non-empty string ID on the vault model's connection; there is no shared-key fallback for invalid owners.
+Enable per-tenant key derivation to derive encryption keys with HKDF-SHA-256 from the current `app.key`, using a digest of the owner type/ID, credential name, and vault connection/database/table/prefix as salt. The service authenticates this context in both encryption modes, so ciphertext copied to another context is rejected. Every operation requires a persisted owner with an integer or non-empty string ID on the vault model's connection; there is no shared-key fallback for invalid owners.
 
 @verbatim
 <code-snippet name="Enable per-tenant encryption in config" lang="php">
@@ -49,15 +49,15 @@ Enable per-tenant key derivation to derive encryption keys with HKDF-SHA-256 fro
 // No change in calling code — encryption is handled internally
 $workspace->storeCredential('stripe_secret', 'sk_live_...');
 $value = $workspace->retrieveCredential('stripe_secret');
-// Derivation binds owner type/ID, credential name, and connection/database/table.
+// Derivation binds owner type/ID, credential name, and connection/database/table/prefix.
 </code-snippet>
 @endverbatim
 
-The derived encrypter uses `app.cipher` and only the current `app.key`; it does not try Laravel's previous keys. The default mode uses the injected Laravel encrypter, including its configured previous keys. Changing modes or derived-key inputs requires a custom migration that reads under the old settings and re-stores under the new ones. `credential-vault:upgrade-encryption` only upgrades legacy payloads under unchanged settings.
+The derived encrypter uses `app.cipher` and only the current `app.key`; it does not try Laravel's previous keys. The default mode uses the injected Laravel encrypter, including its configured previous keys. Changing modes or derived-key inputs requires a custom migration that reads under the old settings and re-stores under the new ones. `credential-vault:upgrade-encryption` upgrades `scv2:` and older payloads to `scv3:` under unchanged settings, adding table-prefix binding. Run it for every tenant prefix before resuming traffic.
 
 ### Custom Encryption Implementation
 
-Swap the encryption layer by binding a custom `VaultEncryptionInterface` implementation in config. Preserve arbitrary string bytes and authenticate ciphertext. Add `#[\SensitiveParameter]` to concrete secret parameters; interface attributes are not inherited. The service wraps values in an authenticated context envelope, including when using a custom driver.
+Swap the encryption layer by binding a custom `VaultEncryptionInterface` implementation in config. Preserve arbitrary string bytes and authenticate ciphertext. Add `#[\SensitiveParameter]` to concrete secret parameters; interface attributes are not inherited. The service wraps values in an authenticated context envelope, including when using a custom driver. The KMS class below is an application implementation skeleton, not a bundled adapter.
 
 @verbatim
 <code-snippet name="Register a custom encryption implementation" lang="php">
@@ -100,7 +100,7 @@ Select a class implementing `VaultServiceInterface` to customize storage or audi
 <code-snippet name="Register a custom VaultService implementation" lang="php">
 // In config/packages.credential-vault.general.php
 'services' => [
-    'vault' => \App\Vault\CachedVaultService::class,
+    'vault' => \App\Vault\AuditedVaultService::class, // Application-provided implementation
     'encryption' => \Skillcraft\CredentialVault\Services\LaravelVaultEncryption::class,
 ],
 </code-snippet>
@@ -112,19 +112,21 @@ Set `packages.credential-vault.general.model` to `VaultEntry` or a subclass to c
 
 ### Credential Expiry
 
-`VaultService::store()` writes ciphertext and metadata but does not set `expires_at`. Set that column on the returned `VaultEntry` or via a follow-up update. At or after expiry, `retrieve()` returns `null` when `expired.return_null` is true; setting it to false allows decryption normally. Active updates through `store()` or `rotate()` preserve expiry; storing a deleted entry restores it and clears expiry. `exists()` and `listKeys()` include expired entries.
+`VaultService::store()` writes ciphertext and metadata but has no expiry argument. Set `expires_at` on the returned Eloquent entry. At or after expiry, `retrieve()` returns `null` when `expired.return_null` is true; setting it to false allows decryption normally. Updates to non-deleted rows through `store()` or `rotate()` preserve expiry, including already-expired timestamps; restoring a deleted entry clears it. `exists()` and `listKeys()` include expired entries. Storage and the expiry update are separate writes; wrap both in a transaction on the vault connection if they must be atomic.
 
 @verbatim
 <code-snippet name="Store then set expires_at on the vault entry" lang="php">
 use Skillcraft\CredentialVault\Facades\Vault;
+use Skillcraft\CredentialVault\Models\VaultEntry;
 
-Vault::store($workspace, 'temp_access_token', $token, [
+$entry = Vault::store($workspace, 'temp_access_token', $token, [
     'provider' => 'oauth',
 ]);
 
-$workspace->vaultEntries()
-    ->where('key_name', 'temp_access_token')
-    ->update(['expires_at' => now()->addHour()]);
+if (! $entry instanceof VaultEntry) {
+    throw new \LogicException('This expiry example requires the Eloquent vault implementation.');
+}
+$entry->update(['expires_at' => now()->addHour()]);
 
 // After expiry, retrieve returns null when expired.return_null is true
 $token = Vault::retrieve($workspace, 'temp_access_token');
@@ -173,7 +175,7 @@ $workspace->storeCredential('openai_api_key', $request->api_key, [
 
 ### Event-Driven Audit Logging
 
-When `audit.enabled = true`, `CredentialAccessed` is dispatched after a successful decryption in `retrieve()`. Calls returning `null` or throwing do not emit this event. Configure logging in your listener; `audit.log_channel` is unused by the package.
+When `audit.enabled = true`, `CredentialAccessed` is dispatched after a successful decryption in `retrieve()`. Null returns and failures before dispatch, including decryption failures, emit no access event. A synchronous listener can throw after dispatch begins and prevent plaintext from being returned. Configure logging in your listener; `audit.log_channel` is unused by the package. Define the example `audit` logging channel in the application. Event fields identify the owner/key, not the acting user, and delivery is not a durable audit guarantee.
 
 @verbatim
 <code-snippet name="Register a credential access listener" lang="php">
@@ -210,32 +212,33 @@ class LogCredentialAccess
 
 ### Direct VaultEntry Eloquent Queries
 
-For reporting, query `VaultEntry` directly and scope by both morph class and owner key. Use the service for secret values and `store()` to restore deleted credentials with a replacement value. Direct model updates can manage expiry, but bypass the service's credential encryption and lifecycle events. If a custom entry model is configured, query that class instead.
+For trusted reporting, authorize the caller, query by both morph class and owner key, and check returned identities exactly because database collations can broaden matches. Direct queries/updates bypass service validation, exact comparisons, encryption, expiry filtering, and credential events. Use the service for secret values and restoration; prefer its returned model for expiry updates. If a custom entry model is configured, query that class instead. These reporting results include metadata and must not replace the restricted AI tools.
 
 @verbatim
 <code-snippet name="Query VaultEntry for reporting purposes" lang="php">
 use Skillcraft\CredentialVault\Models\VaultEntry;
 
-// All entries for a workspace, ordered by recency
+// $workspace is loaded and authorized; use the configured subclass if overridden.
 $entries = VaultEntry::where('owner_type', $workspace->getMorphClass())
     ->where('owner_id', (string) $workspace->getKey())
     ->orderByDesc('created_at')
-    ->get(['id', 'key_name', 'metadata', 'rotated_at', 'expires_at', 'created_at']);
+    ->get(['id', 'owner_type', 'owner_id', 'key_name', 'metadata', 'rotated_at', 'expires_at', 'created_at'])
+    ->filter(static fn (VaultEntry $entry): bool =>
+        $entry->getOwnerType() === $workspace->getMorphClass()
+        && $entry->getOwnerId() === (string) $workspace->getKey()
+    )->values();
 
-// Entries never rotated, or last rotated more than 90 days ago
-$stale = VaultEntry::where('owner_type', $workspace->getMorphClass())
-    ->where('owner_id', (string) $workspace->getKey())
-    ->where(function ($q) {
-        $q->whereNull('rotated_at')
-          ->orWhere('rotated_at', '<', now()->subDays(90));
-    })
-    ->get();
+// Filter the verified rows for entries never rotated or rotated over 90 days ago.
+$cutoff = now()->subDays(90)->getTimestamp();
+$stale = $entries->filter(static fn (VaultEntry $entry): bool =>
+    $entry->getRotatedAt() === null || $entry->getRotatedAt()->getTimestamp() < $cutoff
+)->values();
 </code-snippet>
 @endverbatim
 
 ### Production Agent Tool Registration
 
-The optional tools require Laravel AI SDK `^1.3`. In an agent implementing `HasTools`, create a context using the application's authenticated actor and selected owner. Define the `viewVaultCredential` Gate ability/policy first; its arguments are the owner and credential key. Undefined abilities deny access.
+The optional tools require Laravel AI SDK `^1.3`. In an agent implementing `HasTools`, create a context using the application's authenticated actor and selected owner. Define the `viewVaultCredential` Gate ability/policy first; its arguments are the owner and credential key. Undefined abilities deny access unless an application Gate hook grants it. The explicit allowlist always applies.
 
 @verbatim
 <code-snippet name="Register credential inspection tools on a Laravel AI agent" lang="php">
@@ -255,4 +258,4 @@ return [new ListCredentialKeys($context), new GetCredentialStatus($context)];
 </code-snippet>
 @endverbatim
 
-For queued agents, store trusted actor/owner identifiers and construct the context inside `tools()` after reloading models and establishing any tenant database connection. Do not serialize Gate/context instances or bind them as singletons. Gate permissions are checked on every invocation, so policies should use current authorization data. SDK `ToolInvoked` events provide invocation telemetry; the vault's `CredentialAccessed` event does not fire for status/discovery. The tools read the configured Eloquent model, not a custom service's alternative backend. See `docs/agent-tools.md`.
+For queued agents, store trusted actor/owner identifiers, establish tenant database context before reloading models, and construct the context inside `tools()`. Do not serialize Gate/context instances or bind them as singletons. Gate permissions are checked on every invocation, so policies should use current authorization data. SDK `ToolInvoked` events provide invocation telemetry; the vault's `CredentialAccessed` event does not fire for status/discovery. The tools read the configured Eloquent model, not a custom service's alternative backend. Their restrictions do not govern direct service calls or arbitrary application-code execution. See `docs/agent-tools.md`.

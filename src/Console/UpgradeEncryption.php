@@ -16,7 +16,7 @@ final class UpgradeEncryption extends Command
 {
     protected $signature = 'credential-vault:upgrade-encryption {--dry-run : Validate all rows without saving changes}';
 
-    protected $description = 'Bind legacy ciphertext to its current owner, credential name, and database context';
+    protected $description = 'Bind legacy and scv2 ciphertext to its owner, credential name, database, and table prefix';
 
     public function handle(VaultEncryptionInterface $encryption): int
     {

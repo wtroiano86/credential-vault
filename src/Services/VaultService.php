@@ -49,7 +49,15 @@ final readonly class VaultService implements VaultServiceInterface
 
             try {
                 return $connection->transaction(function () use ($identity, $encrypted, $metadata, &$writeFinished): VaultEntry {
-                    $entry = $this->query($identity)->withTrashed()->lockForUpdate()->first() ?? $identity->newInstance($identity->getAttributes());
+                    $entry = $this->query($identity)->withTrashed()->lockForUpdate()->first();
+
+                    // A permissive collation can match a different owner or key,
+                    // including a deleted row. Never update or restore that row.
+                    if ($entry !== null && ! VaultOwnerScope::matchesCredential($entry, $identity)) {
+                        throw new CredentialPersistenceException('Credential storage conflicts with a different identity under the database collation.');
+                    }
+
+                    $entry ??= $identity->newInstance($identity->getAttributes());
                     $entry->setAttribute('encrypted_value', $encrypted);
                     $entry->setAttribute('metadata', $metadata);
 
@@ -86,7 +94,8 @@ final readonly class VaultService implements VaultServiceInterface
         $identity = $this->identity($owner, $key);
         $entry = $this->query($identity)->first();
 
-        if ($entry === null || ($entry->isExpired() && VaultConfig::get('expired.return_null', true))) {
+        if ($entry === null || ! VaultOwnerScope::matchesCredential($entry, $identity)
+            || ($entry->isExpired() && VaultConfig::get('expired.return_null', true))) {
             return null;
         }
 
@@ -107,7 +116,7 @@ final readonly class VaultService implements VaultServiceInterface
         $identity->getConnection()->transaction(function () use ($identity): void {
             $entry = $this->query($identity)->lockForUpdate()->first();
 
-            if ($entry === null) {
+            if ($entry === null || ! VaultOwnerScope::matchesCredential($entry, $identity)) {
                 return;
             }
 
@@ -130,7 +139,7 @@ final readonly class VaultService implements VaultServiceInterface
         return $identity->getConnection()->transaction(function () use ($identity, $encrypted): VaultEntry {
             $entry = $this->query($identity)->lockForUpdate()->first();
 
-            if ($entry === null) {
+            if ($entry === null || ! VaultOwnerScope::matchesCredential($entry, $identity)) {
                 throw new CredentialNotFoundException('Credential not found for this owner.');
             }
 
@@ -151,7 +160,10 @@ final readonly class VaultService implements VaultServiceInterface
 
     public function exists(Model $owner, string $key): bool
     {
-        return $this->query($this->identity($owner, $key))->exists();
+        $identity = $this->identity($owner, $key);
+        $entry = $this->query($identity)->withoutEagerLoads()->first(['owner_type', 'owner_id', 'key_name']);
+
+        return $entry !== null && VaultOwnerScope::matchesCredential($entry, $identity);
     }
 
     /** @return array<int, array{key: string, metadata: array<string, mixed>, created_at: string, rotated_at: ?string}> */
@@ -162,7 +174,9 @@ final readonly class VaultService implements VaultServiceInterface
         return $identity->newQuery()
             ->where('owner_type', $identity->getAttribute('owner_type'))
             ->where('owner_id', $identity->getAttribute('owner_id'))
-            ->get()->map(static fn (VaultEntry $entry): array => [
+            ->get()
+            ->filter(static fn (VaultEntry $entry): bool => VaultOwnerScope::matchesOwner($entry, $identity))
+            ->map(static fn (VaultEntry $entry): array => [
                 'key' => $entry->getCredentialKey(),
                 'metadata' => $entry->getMetadata(),
                 'created_at' => $entry->created_at?->toIso8601String() ?? '',
